@@ -1,0 +1,6 @@
+{
+  "name": "Android Language Learning Architecture Sandbox",
+  "description": "An interactive architecture builder, Jetpack Compose UI simulator, subtitle parser playground, and database schema visualizer for building a Kotlin-based language learning app.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
