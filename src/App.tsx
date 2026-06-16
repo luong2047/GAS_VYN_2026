@@ -1,15 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Database, Smartphone, FileCode, Cloud, 
-  Sparkles, Layers, RefreshCw, Github, HelpCircle 
-} from 'lucide-react';
 import { Topic, Article, AccessLog, SubtitleSegment, SyncLog, VocabularyItem } from './types';
 import { PhoneSimulator } from './components/PhoneSimulator';
-import { DbVisualizer } from './components/DbVisualizer';
-import { ParserPlayground } from './components/ParserPlayground';
-import { DriveSyncVisualizer } from './components/DriveSyncVisualizer';
-import { CodeExplorer } from './components/CodeExplorer';
-import { kotlinSourceFiles } from './data/sourceCode';
 
 // Local Javascript parser mimicking the Kotlin SubtitleParser.kt code
 export const parseSubtitles = (content: string): SubtitleSegment[] => {
@@ -440,170 +431,23 @@ export default function App() {
 
   return (
     <div id="app-root" className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans selection:bg-indigo-500/10 selection:text-indigo-900">
-      
-      {/* 1. Global Navigation & Brand Header */}
-      <header className="border-b border-slate-200 bg-white/80 backdrop-blur-md sticky top-0 z-50 px-6 py-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 shadow-xs">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-400 flex items-center justify-center shadow-md shadow-indigo-100 border border-indigo-500/10">
-            <Smartphone className="w-5.5 h-5.5 text-white" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h1 className="text-md font-extrabold tracking-tight text-slate-900 font-sans">Kotlin Android Architecture Sandbox</h1>
-              <span className="text-[10px] bg-indigo-150 text-indigo-700 font-bold px-2 py-0.5 rounded-full border border-indigo-200/50">
-                PRO COMPILER v2.4
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 font-medium">Jetpack Compose • MVVM • Clean Architecture • Room DB • WorkManager</p>
-          </div>
-        </div>
-
-        {/* Global tab triggers */}
-        <div className="flex bg-slate-100 p-1 rounded-xl border border-slate-200">
-          <button
-            onClick={() => setActiveTab('app')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === 'app' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <Smartphone className="w-3.5 h-3.5" />
-            <span>UI Simulator</span>
-          </button>
-          
-          <button
-            onClick={() => setActiveTab('database')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === 'database' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <Database className="w-3.5 h-3.5" />
-            <span>Room SQLite</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('parser')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === 'parser' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <FileCode className="w-3.5 h-3.5" />
-            <span>SRT Parser</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('sync')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === 'sync' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <Cloud className="w-3.5 h-3.5" />
-            <span>Drive Sync</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('code')}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-              activeTab === 'code' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-            }`}
-          >
-            <FileCode className="w-3.5 h-3.5" />
-            <span>Kotlin Codebase</span>
-          </button>
-        </div>
-      </header>
-
-      {/* 2. Main Content Board */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 lg:p-8 space-y-8 select-text">
-        
-        {/* Dynamic Screen Mounting */}
-        {activeTab === 'app' && (
-          <div className="space-y-6">
-            <div className="bg-white border border-slate-200 p-5 rounded-2xl shadow-xs flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900 flex items-center space-x-2">
-                  <Sparkles className="w-5 h-5 text-indigo-500" />
-                  <span>Jetpack Compose Playback Sync UI</span>
-                </h2>
-                <p className="text-slate-550 text-xs mt-1">
-                  Experience standard Android timing highlights. Tap subtitle cards to test automatic seek triggers immediately.
-                </p>
-              </div>
-
-              {/* Stats overview */}
-              <div className="flex gap-4 font-mono text-xs">
-                <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl">
-                  <span className="text-slate-500 block">Topics Rows:</span>
-                  <strong className="text-slate-900 text-md font-bold">{topics.length}</strong>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl">
-                  <span className="text-slate-500 block">Articles Columns:</span>
-                  <strong className="text-indigo-600 text-md font-bold">{articles.length}</strong>
-                </div>
-                <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-xl">
-                  <span className="text-slate-500 block">Access Log Count:</span>
-                  <strong className="text-emerald-600 text-md font-bold">{accessLogs.length}</strong>
-                </div>
-              </div>
-            </div>
-
-            <PhoneSimulator 
-              topics={topics}
-              articles={articles}
-              accessLogs={accessLogs}
-              onOpenArticle={handleOpenArticle}
-              subtitleParser={parseSubtitles}
-              onUpdateArticle={handleUpdateArticle}
-              onAddArticle={handleAddArticle}
-              onDeleteArticle={handleDeleteArticle}
-              onUpdateVocabulary={handleUpdateVocabulary}
-              onToggleMarkArticle={handleToggleMarkArticle}
-              onAddTopic={handleAddTopic}
-              onUpdateTopic={handleUpdateTopic}
-              onDeleteTopic={handleDeleteTopic}
-              onImportData={handleImportData}
-              onGoogleDriveSync={handleMockSync}
-            />
-          </div>
-        )}
-
-        {activeTab === 'database' && (
-          <DbVisualizer 
-            topics={topics}
-            articles={articles}
-            accessLogs={accessLogs}
-            onAddTopic={handleAddTopic}
-            onAddArticle={handleAddArticle}
-            onClearDb={handleClearDb}
-          />
-        )}
-
-        {activeTab === 'parser' && (
-          <ParserPlayground 
-            onParseTest={parseSubtitles}
-          />
-        )}
-
-        {activeTab === 'sync' && (
-          <DriveSyncVisualizer 
-            onTriggerMockSync={handleMockSync}
-            syncHistory={syncHistory}
-          />
-        )}
-
-        {activeTab === 'code' && (
-          <CodeExplorer 
-            sourceFiles={kotlinSourceFiles}
-          />
-        )}
-
-      </main>
-
-      {/* 3. Footer */}
-      <footer className="border-t border-slate-200 bg-white py-6 px-8 text-center text-xs text-slate-500 select-none">
-        <p className="font-mono">Kotlin Android Language Spec & Sandbox • Built for Deep Learning Environments</p>
-        <p className="mt-1 text-slate-400">Strictly conforms to Jetpack Compose, MVVM pattern, Room DB cascade logs, and Google Drive appdata cloud sync.</p>
-      </footer>
-
+      <PhoneSimulator 
+        topics={topics}
+        articles={articles}
+        accessLogs={accessLogs}
+        onOpenArticle={handleOpenArticle}
+        subtitleParser={parseSubtitles}
+        onUpdateArticle={handleUpdateArticle}
+        onAddArticle={handleAddArticle}
+        onDeleteArticle={handleDeleteArticle}
+        onUpdateVocabulary={handleUpdateVocabulary}
+        onToggleMarkArticle={handleToggleMarkArticle}
+        onAddTopic={handleAddTopic}
+        onUpdateTopic={handleUpdateTopic}
+        onDeleteTopic={handleDeleteTopic}
+        onImportData={handleImportData}
+        onGoogleDriveSync={handleMockSync}
+      />
     </div>
   );
 }

@@ -1359,7 +1359,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col xl:flex-row gap-8 items-center xl:items-stretch h-full">
+    <div className="w-full max-w-md mx-auto bg-slate-50 text-slate-850 flex flex-col relative overflow-hidden shadow-2xl md:my-6 md:rounded-[45px] md:border-8 md:border-slate-900 h-screen md:h-[820px] select-text">
       {/* Hidden React audio playback synchronizer */}
       <audio
         ref={audioPlayerRef}
@@ -1374,116 +1374,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
           }
         }}
       />
-      {/* 1. Technical explanation on left (Clean Architecture connection) */}
-      <div className="w-full xl:w-2/5 flex flex-col justify-between">
-        <div>
-          <div className="flex items-center space-x-2 mb-3">
-            <Smartphone className="text-indigo-600 w-5 h-5" />
-            <h3 className="text-lg font-semibold text-slate-900 tracking-tight">
-              Android Application UI Simulator
-            </h3>
-          </div>
-          <p className="text-slate-600 text-sm leading-relaxed mb-4">
-            Below is a live interactive simulation of your{" "}
-            <span className="text-indigo-650 font-semibold">
-              Jetpack Compose
-            </span>{" "}
-            playback screen running inside the Android runtime.
-          </p>
-
-          <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 mb-4 space-y-3">
-            <h4 className="text-xs font-bold text-indigo-700 uppercase tracking-wider">
-              Jetpack Compose Specs Met:
-            </h4>
-
-            <div className="space-y-2.5 text-xs text-slate-650">
-              <div className="flex items-start space-x-2">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Dynamic Highlighting:</strong> Changes subtitle colors
-                  in real time synchronised to the exact millisecond counter of
-                  the media player.
-                </span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Interactive Seekable Subtitles:</strong> Tap any
-                  subtitle card inside the playlist to trigger local Room update
-                  flows and seek directly to that timing block!
-                </span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>M3 Theme Alignment:</strong> Utilizes Material Design
-                  3 UI states: TopAppBar, lazy list scrolling, dynamic loading
-                  placeholders, and tonal cards.
-                </span>
-              </div>
-              <div className="flex items-start space-x-2">
-                <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Room Auto Increment:</strong> Opening an article
-                  registers the action, updating counts immediately via flow
-                  collectors in the local Room schema.
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Dynamic State Info Panel */}
-        <div className="bg-slate-50 p-4 rounded-xl border border-dashed border-slate-200 text-xs space-y-2">
-          <div className="flex justify-between text-slate-500">
-            <span>Active Section:</span>
-            <span className="text-indigo-600 uppercase font-mono font-semibold">
-              {currentScreen}
-            </span>
-          </div>
-          {selectedArticle && (
-            <>
-              <div className="flex justify-between text-slate-500">
-                <span>Article Title:</span>
-                <span className="text-slate-800 font-semibold truncate max-w-[160px]">
-                  {selectedArticle.title}
-                </span>
-              </div>
-              <div className="flex justify-between text-slate-500">
-                <span>Log Trigger:</span>
-                <span className="text-indigo-600 font-mono">
-                  Room.openArticleAndLog()
-                </span>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* 2. Interactive Android Device Frame on right */}
-      <div className="w-full xl:w-3/5 flex justify-center items-center">
-        {/* Physical phone bezel container */}
-        <div className="relative w-[340px] h-[680px] bg-slate-950 rounded-[40px] border-4 border-slate-750 shadow-2xl overflow-hidden flex flex-col ring-8 ring-slate-200/50">
-          {/* Phone Speaker & Camera Notch */}
-          <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-40 h-6 bg-slate-950 rounded-b-2xl z-50 flex items-center justify-center space-x-1">
-            <div className="w-12 h-1 bg-slate-800 rounded-full"></div>
-            <div className="w-2.5 h-2.5 bg-slate-900 rounded-full border border-slate-800"></div>
-          </div>
-
-          {/* Android Status Bar (Material 3 style) */}
-          <div className="h-7 bg-slate-100 px-5 flex items-end justify-between text-[11px] text-slate-600 font-mono select-none pt-1 shrink-0 z-40">
-            <span>08:42 AM</span>
-            <div className="flex items-center space-x-2">
-              <span className="text-[10px]">5G</span>
-              <div className="w-5 h-2.5 border border-slate-350 rounded-sm p-0.5 flex items-center">
-                <div className="h-full w-4 bg-slate-600 rounded-2xs"></div>
-              </div>
-            </div>
-          </div>
-
-          {/* Core Device Screen Sub-Layout */}
-          <div className="flex-1 flex flex-col bg-slate-50 text-slate-800 relative overflow-hidden">
-            {currentScreen === "exited" ? (
+      {currentScreen === "exited" ? (
               <div className="flex-1 bg-slate-950 flex flex-col justify-center items-center text-center p-6 space-y-4 select-none">
                 <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600 animate-pulse shadow-inner mx-auto">
                   <Smartphone className="w-8 h-8" />
@@ -3994,17 +3885,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 </div>
               </>
             )}
-          </div>
-
-          {/* Simulated virtual pill back control indicator (Gesture bar) */}
-          <div className="h-6 bg-slate-100 flex justify-center items-center shrink-0 border-t border-slate-200 z-40">
-            <div
-              onClick={goBack}
-              className="w-20 h-1 bg-slate-350 rounded-full cursor-pointer hover:bg-slate-550"
-            ></div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 };
