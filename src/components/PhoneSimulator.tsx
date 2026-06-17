@@ -46,6 +46,7 @@ import {
   Crop,
 } from "lucide-react";
 import { Topic, Article, SubtitleSegment, VocabularyItem, AccessLog } from "../types";
+import splashImage from "../assets/images/rabbit_carrot_splash_1781691897305.jpg";
 
 const ARTICLE_IMAGES = [
   "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=120&h=120&q=80", // Learning
@@ -1512,7 +1513,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 className="w-44 h-44 md:w-48 md:h-48 bg-slate-50 rounded-full flex items-center justify-center p-2 shadow-sm border border-slate-100/50"
               >
                 <img
-                  src="/src/assets/images/rabbit_carrot_splash_1781691897305.jpg"
+                  src={splashImage}
                   alt="Rabbit hugging a carrot"
                   referrerPolicy="no-referrer"
                   className="w-full h-full object-contain rounded-full"
