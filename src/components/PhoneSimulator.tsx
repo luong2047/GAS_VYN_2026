@@ -1722,10 +1722,10 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       </button>
                     )}
                     <span
-                      className={`font-bold text-slate-900 align-middle ${
+                      className={`font-bold text-[14px] leading-[20px] align-middle ${
                         currentScreen === "article-detail"
-                          ? "text-xs leading-tight py-0.5 max-w-[215px] break-words block"
-                          : "text-sm tracking-tight truncate max-w-[170px] inline-block"
+                          ? "text-[#204A87] py-0.5 max-w-[215px] truncate block"
+                          : "text-[#1b1b1b] tracking-tight truncate max-w-[170px] inline-block"
                       }`}
                       title={selectedArticle?.title}
                     >
@@ -3437,7 +3437,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         {/* Cover Image Selector & Uploader */}
                         <div className="space-y-1.5">
                           <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                            Article Cover Image
+                            COVER PICTURE
                           </label>
                           <div className="flex items-center space-x-3 bg-slate-50 border border-slate-200/85 p-2 rounded-xl">
                             {/* Current Cover Preview */}
@@ -3536,7 +3536,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         {/* Audio File Selection & Copy to Local DB representation */}
                         <div className="space-y-1.5">
                           <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                            Article Audio Sync File
+                            AUDIO SYNC FILE
                           </label>
                           <div className="bg-slate-50 border border-slate-200/85 p-2 rounded-xl space-y-2">
                             <div className="flex items-center justify-between">
@@ -3596,7 +3596,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         <div className="space-y-2 flex-grow flex flex-col min-h-[160px]">
                           <div className="flex justify-between items-center">
                             <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                              Article Content
+                              CONTENT (SUPPORT .SRT FORMAT)
                             </label>
                             <button
                               type="button"
@@ -3817,7 +3817,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             }}
                             className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-indigo-100 text-center"
                           >
-                            {isEditingNew ? "Add to Room" : "Save Changes"}
+                            {isEditingNew ? "Create article" : "Save Changes"}
                           </button>
                         </div>
                       </div>
