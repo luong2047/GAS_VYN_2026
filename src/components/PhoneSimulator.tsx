@@ -1052,24 +1052,75 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     "text-[32px]",
   ];
 
-  // Dynamically load web speech synthesis voices
+  // Dynamically load web speech synthesis voices with a robust polling fallback and multiple events for mobile/WebView
   useEffect(() => {
+    let intervalId: NodeJS.Timeout | null = null;
+    let attempts = 0;
+    const maxAttempts = 30; // 15 seconds max
+
     const updateVoices = () => {
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         const allVoices = window.speechSynthesis.getVoices();
-        setVoices(allVoices);
-        if (allVoices.length > 0 && !selectedVoiceURI) {
-          const defaultVoice =
-            allVoices.find((v) => v.lang.startsWith("en")) || allVoices[0];
-          setSelectedVoiceURI(defaultVoice.voiceURI);
+        
+        // Android WebView and Google TTS often require polling or multiple calls
+        // until the voices array gets fully resolved and populated.
+        if (allVoices && allVoices.length > 0) {
+          setVoices(allVoices);
+          
+          // Set a default voice if and only if none is currently selected
+          setSelectedVoiceURI((prev) => {
+            if (prev) return prev;
+            // Prefer Google voices or English/Local languages to match standard TTS use
+            const googleVoice = allVoices.find((v) => v.name.toLowerCase().includes("google") && v.lang.startsWith("en"));
+            const enVoice = allVoices.find((v) => v.lang.startsWith("en"));
+            const fallbackVoice = googleVoice || enVoice || allVoices[0];
+            return fallbackVoice ? fallbackVoice.voiceURI : "";
+          });
+
+          // Since we found voices, we can clear the interval to save resources
+          if (allVoices.length > 5 && intervalId) {
+            clearInterval(intervalId);
+            intervalId = null;
+          }
         }
       }
     };
+
+    // 1. Initial attempt
     updateVoices();
+
+    // 2. Event listener for standard onvoiceschanged
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.onvoiceschanged = updateVoices;
+      if (window.speechSynthesis.addEventListener) {
+        window.speechSynthesis.addEventListener("voiceschanged", updateVoices);
+      }
     }
-  }, [selectedVoiceURI]);
+
+    // 3. Polling mechanism for Android system WebView/Chrome Mobile
+    intervalId = setInterval(() => {
+      attempts++;
+      updateVoices();
+      if (attempts >= maxAttempts) {
+        if (intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+        }
+      }
+    }, 500);
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.onvoiceschanged = null;
+        if (window.speechSynthesis.removeEventListener) {
+          window.speechSynthesis.removeEventListener("voiceschanged", updateVoices);
+        }
+      }
+    };
+  }, []);
 
   // Autoread and quiz cleanup on screen or article selection change
   useEffect(() => {
