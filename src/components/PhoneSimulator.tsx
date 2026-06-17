@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { motion, AnimatePresence } from "motion/react";
 import {
   Play,
   Pause,
@@ -19,6 +20,7 @@ import {
   ZoomIn,
   ZoomOut,
   FileDown,
+  FileUp,
   MoreVertical,
   Edit,
   Plus,
@@ -40,6 +42,8 @@ import {
   CloudUpload,
   Download,
   Upload,
+  Settings,
+  Crop,
 } from "lucide-react";
 import { Topic, Article, SubtitleSegment, VocabularyItem, AccessLog } from "../types";
 
@@ -250,12 +254,24 @@ const CustomDatePicker: React.FC<{
 
           <div className="grid grid-cols-7 gap-0.5">
             {allCells.map((cell, idx) => {
+              if (!cell.isCurrentMonth) {
+                return (
+                  <div key={idx} className="aspect-square" />
+                );
+              }
+
               const cellDate = new Date(cell.year, cell.month, cell.day);
               const yStr = cellDate.getFullYear();
               const mStr = String(cellDate.getMonth() + 1).padStart(2, '0');
               const dStr = String(cellDate.getDate()).padStart(2, '0');
               const cellDateStr = `${yStr}-${mStr}-${dStr}`;
               const isSelected = value === cellDateStr;
+
+              const todayObj = new Date();
+              const isToday = 
+                todayObj.getDate() === cell.day && 
+                todayObj.getMonth() === cell.month && 
+                todayObj.getFullYear() === cell.year;
 
               return (
                 <button
@@ -268,9 +284,11 @@ const CustomDatePicker: React.FC<{
                   className={`aspect-square text-[9px] font-bold rounded-md flex items-center justify-center transition-all cursor-pointer ${
                     isSelected
                       ? "bg-indigo-600 text-white shadow-xs"
-                      : cell.isCurrentMonth
-                        ? "text-slate-850 hover:bg-slate-150"
-                        : "text-slate-350 hover:bg-slate-50"
+                      : "text-slate-850 hover:bg-slate-150"
+                  } ${
+                    isToday 
+                      ? (isSelected ? "ring-2 ring-indigo-600 ring-offset-1 rounded-md" : "border-2 border-indigo-600 rounded-md") 
+                      : ""
                   }`}
                 >
                   {cell.day}
@@ -323,6 +341,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     | "vocabulary"
     | "topic-management"
     | "search-articles"
+    | "settings"
     | "exited"
   >("topics");
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
@@ -543,6 +562,99 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const [editContent, setEditContent] = useState("");
   const [editImageUrl, setEditImageUrl] = useState("");
   const [editAudioUrl, setEditAudioUrl] = useState("");
+  const [rawUploadedImage, setRawUploadedImage] = useState<string | null>(null);
+  const [cropZoom, setCropZoom] = useState<number>(1);
+  const [cropOffset, setCropOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isDraggingCrop, setIsDraggingCrop] = useState<boolean>(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+
+  const handleCropMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsDraggingCrop(true);
+    setDragStart({ x: e.clientX - cropOffset.x, y: e.clientY - cropOffset.y });
+  };
+
+  const handleCropMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDraggingCrop) return;
+    setCropOffset({
+      x: e.clientX - dragStart.x,
+      y: e.clientY - dragStart.y,
+    });
+  };
+
+  const handleCropMouseUp = () => {
+    setIsDraggingCrop(false);
+  };
+
+  const handleCropTouchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length === 1) {
+      setIsDraggingCrop(true);
+      const touch = e.touches[0];
+      setDragStart({ x: touch.clientX - cropOffset.x, y: touch.clientY - cropOffset.y });
+    }
+  };
+
+  const handleCropTouchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!isDraggingCrop) return;
+    if (e.touches.length === 1) {
+      const touch = e.touches[0];
+      setCropOffset({
+        x: touch.clientX - dragStart.x,
+        y: touch.clientY - dragStart.y,
+      });
+    }
+  };
+
+  const handleCropTouchEnd = () => {
+    setIsDraggingCrop(false);
+  };
+
+  const handleSaveCrop = () => {
+    if (!rawUploadedImage) return;
+    const img = new Image();
+    img.onload = () => {
+      const imageNaturalWidth = img.naturalWidth;
+      const imageNaturalHeight = img.naturalHeight;
+      const imgRatio = imageNaturalWidth / imageNaturalHeight;
+      const viewRatio = 320 / 144;
+      
+      let fitW = 320;
+      let fitH = 144;
+      if (imgRatio > viewRatio) {
+        fitW = 320;
+        fitH = 320 / imgRatio;
+      } else {
+        fitW = 144 * imgRatio;
+        fitH = 144;
+      }
+      
+      const canvas = document.createElement("canvas");
+      canvas.width = 640;
+      canvas.height = 288;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, 640, 288);
+        
+        const scaleFactor = 2;
+        const xCanvas = ((320 - fitW * cropZoom) / 2 + cropOffset.x) * scaleFactor;
+        const yCanvas = ((144 - fitH * cropZoom) / 2 + cropOffset.y) * scaleFactor;
+        const wCanvas = (fitW * cropZoom) * scaleFactor;
+        const hCanvas = (fitH * cropZoom) * scaleFactor;
+        
+        ctx.drawImage(img, xCanvas, yCanvas, wCanvas, hCanvas);
+        
+        try {
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+          setEditImageUrl(dataUrl);
+        } catch (e) {
+          console.error("Canvas export failed: ", e);
+          setEditImageUrl(rawUploadedImage);
+        }
+      }
+      setRawUploadedImage(null);
+    };
+    img.src = rawUploadedImage;
+  };
   const [isEditingNew, setIsEditingNew] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTranslation, setShowTranslation] = useState(false);
@@ -572,6 +684,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   } | null>(null);
   const [vocabFontSize, setVocabFontSize] = useState<string>("text-[13px]");
   const [isVocabMenuOpen, setIsVocabMenuOpen] = useState(false);
+  const [isInsertExpressionExpanded, setIsInsertExpressionExpanded] = useState(true);
 
   // Swipe detection refs for touch/mouse gestures
   const touchStartXRef = useRef<number | null>(null);
@@ -1318,6 +1431,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     }
     setCurrentScreen("article-detail");
     onOpenArticle(article.id);
+    setIsInsertExpressionExpanded(false);
   };
 
   const goBack = () => {
@@ -1341,7 +1455,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       setCurrentScreen(isEditingNew ? ((cameFromSearch || !selectedTopic) ? "search-articles" : "articles") : "article-detail");
     } else if (currentScreen === "vocabulary") {
       setCurrentScreen("article-detail");
-    } else if (currentScreen === "topic-management") {
+    } else if (currentScreen === "topic-management" || currentScreen === "settings") {
       setCurrentScreen("topics");
     } else if (currentScreen === "search-articles") {
       setCurrentScreen("topics");
@@ -1359,7 +1473,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   };
 
   return (
-    <div className="w-full max-w-md mx-auto bg-slate-50 text-slate-850 flex flex-col relative overflow-hidden shadow-2xl md:my-6 md:rounded-[45px] md:border-8 md:border-slate-900 h-screen md:h-[820px] select-text">
+    <div className="w-full min-h-screen bg-slate-50 text-slate-850 flex flex-col relative overflow-hidden select-text">
       {/* Hidden React audio playback synchronizer */}
       <audio
         ref={audioPlayerRef}
@@ -1374,33 +1488,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
           }
         }}
       />
-      {currentScreen === "exited" ? (
-              <div className="flex-1 bg-slate-950 flex flex-col justify-center items-center text-center p-6 space-y-4 select-none">
-                <div className="w-16 h-16 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center text-slate-600 animate-pulse shadow-inner mx-auto">
-                  <Smartphone className="w-8 h-8" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-200">
-                    Device Offline
-                  </h3>
-                  <p className="text-[10px] text-slate-500 mt-1 leading-normal">
-                    LuongLQ's Foreign Learning App has shutdown safely.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCurrentScreen("topics");
-                    setSelectedTopic(null);
-                    setSelectedArticle(null);
-                  }}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs shadow-md cursor-pointer transition-colors"
-                >
-                  Power On Device
-                </button>
-              </div>
-            ) : (
-              <>
                 {/* Header Layout (TopAppBar) */}
                 <div className="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 shadow-xs relative z-40">
                   <div className="flex items-center space-x-2">
@@ -1437,64 +1524,16 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               </button>
 
                               <div className="border-t border-slate-100 my-1.5" />
-                              <div className="px-3 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
-                                VDB Backup Data Sharing
-                              </div>
-
-                              <button
-                                onClick={handleExportVdb}
-                                className="w-full text-left px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2 cursor-pointer"
-                                title="Backup database to a .vdb compressed file and save locally"
-                              >
-                                <Download className="w-3.5 h-3.5 text-indigo-500" />
-                                <span>Export (.vdb backup)</span>
-                              </button>
 
                               <button
                                 onClick={() => {
                                   setIsTopicsMenuOpen(false);
-                                  backupFileInputRef.current?.click();
+                                  setCurrentScreen("settings");
                                 }}
                                 className="w-full text-left px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2 cursor-pointer"
-                                title="Restore database by importing a .vdb backup file"
                               >
-                                <Upload className="w-3.5 h-3.5 text-indigo-500" />
-                                <span>Import (.vdb backup)</span>
-                              </button>
-
-                              <div className="border-t border-slate-100 my-1.5" />
-                              <div className="px-3 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider block flex items-center">
-                                <span>Google Drive Sync</span>
-                              </div>
-
-                              <button
-                                onClick={() => {
-                                  setIsTopicsMenuOpen(false);
-                                  setShowSyncSetupDialog(true);
-                                }}
-                                className="w-full text-left px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2 cursor-pointer"
-                                title="Link your Google Account for cloud storage backups"
-                              >
-                                <Cloud className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                                <span>Set Up Account Sync</span>
-                              </button>
-
-                              <button
-                                onClick={() => handleGoogleDriveSync('upload')}
-                                className="w-full text-left px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2 cursor-pointer"
-                                title="Manually upload data from phone into secure Google Drive storage"
-                              >
-                                <CloudUpload className="w-3.5 h-3.5 text-emerald-500" />
-                                <span>Manual Upload (Drive)</span>
-                              </button>
-
-                              <button
-                                onClick={() => handleGoogleDriveSync('download')}
-                                className="w-full text-left px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2 cursor-pointer"
-                                title="Manually download data from Google Drive and restore local phone state"
-                              >
-                                <CloudDownload className="w-3.5 h-3.5 text-emerald-500" />
-                                <span>Manual Download (Drive)</span>
+                                <Settings className="w-3.5 h-3.5 text-indigo-500" />
+                                <span>Settings</span>
                               </button>
 
                               <div className="border-t border-slate-100 my-1.5" />
@@ -1521,14 +1560,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 <span>Exit</span>
                               </button>
                             </div>
-
-                            <input
-                              type="file"
-                              ref={backupFileInputRef}
-                              onChange={handleImportVdb}
-                              accept=".vdb"
-                              className="hidden"
-                            />
                           </>
                         )}
                       </div>
@@ -1553,6 +1584,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       {currentScreen === "topics" && "My Topics"}
                       {currentScreen === "topic-management" &&
                         "Topic Management"}
+                      {currentScreen === "settings" && "Settings"}
                       {currentScreen === "search-articles" && "Search Articles"}
                       {currentScreen === "articles" &&
                         (selectedTopic?.title || "Articles")}
@@ -1561,9 +1593,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       {currentScreen === "edit-article" &&
                         (isEditingNew ? "Create New Article" : "Edit Article")}
                       {currentScreen === "vocabulary" && (
-                        <span className="inline-flex items-center gap-1.5" style={{ color: "#1BC38B" }}>
-                          <span>Vocabulary</span>
-                          <BookOpen className="w-4 h-4 shrink-0" />
+                        <span className="inline-flex items-center gap-1.5" style={{ color: "#049263" }}>
+                          <span style={{ color: "#049263" }}>Vocabulary</span>
+                          <BookOpen className="w-4 h-4 shrink-0" style={{ color: "#049263" }} />
                         </span>
                       )}
                     </span>
@@ -1630,9 +1662,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           {/* Main floating popover menu */}
                           <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-xl shadow-xl border border-slate-200/90 z-50 p-3 space-y-3 animate-in fade-in slide-in-from-top-1 duration-100">
                             {/* Group 0: Manage Article */}
-                            <div>
+                            <div className="space-y-1.5">
                               <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
-                                Database Room Action
+                                ARTICLE ACTION
                               </span>
                               <button
                                 onClick={() => {
@@ -1657,7 +1689,39 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 className="w-full flex items-center justify-center space-x-1.5 bg-indigo-600 hover:bg-indigo-700 text-white py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-3xs hover:scale-[1.02] active:scale-[0.98]"
                               >
                                 <Edit className="w-3 h-3" />
-                                <span>Edit Article Entity</span>
+                                <span>EDIT THIS ARTICLE</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setCurrentScreen("vocabulary");
+                                  setIsMenuOpen(false);
+                                }}
+                                className="w-full flex items-center justify-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-3xs hover:scale-[1.02] active:scale-[0.98]"
+                              >
+                                <BookOpen className="w-3 h-3" />
+                                <span>Vocabulary</span>
+                              </button>
+
+                              <button
+                                id="toggle-translation-btn"
+                                onClick={() => {
+                                  setShowTranslation(!showTranslation);
+                                  setIsMenuOpen(false);
+                                }}
+                                style={{ color: "#fefeff", backgroundColor: "#b73f9b" }}
+                                className={`w-full flex items-center justify-center space-x-1.5 py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer border ${
+                                  showTranslation
+                                    ? "border-pink-300 hover:opacity-90"
+                                    : "border-pink-200 hover:opacity-90"
+                                }`}
+                              >
+                                <Eye className="w-3 h-3" />
+                                <span>
+                                  {showTranslation
+                                    ? "Hide Translation"
+                                    : "Show Translation"}
+                                </span>
                               </button>
                             </div>
 
@@ -1715,35 +1779,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             {/* Divider */}
                             <div className="border-t border-slate-150" />
 
-                            {/* Group 2.5: Translation Pane toggle */}
-                            <div>
-                              <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
-                                Translation Pane
-                              </span>
-                              <button
-                                id="toggle-translation-btn"
-                                onClick={() => {
-                                  setShowTranslation(!showTranslation);
-                                  setIsMenuOpen(false);
-                                }}
-                                className={`w-full flex items-center justify-center space-x-1.5 py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer border ${
-                                  showTranslation
-                                    ? "bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100"
-                                    : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                                }`}
-                              >
-                                <Eye className="w-3 h-3" />
-                                <span>
-                                  {showTranslation
-                                    ? "Hide Translation"
-                                    : "Show Translation"}
-                                </span>
-                              </button>
-                            </div>
-
-                            {/* Divider */}
-                            <div className="border-t border-slate-150" />
-
                             {/* Group 2: Save to plain text */}
                             <div>
                               <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
@@ -1759,44 +1794,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 <FileDown className="w-3 h-3" />
                                 <span>Save Plain Text</span>
                               </button>
-                            </div>
-
-                            {/* Divider */}
-                            <div className="border-t border-slate-150" />
-
-                            {/* Group 3: TTS Voice Selector */}
-                            <div>
-                              <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
-                                TTS Voice (
-                                {voices.length > 0
-                                  ? voices.length
-                                  : "estimating..."}
-                                )
-                              </span>
-                              <select
-                                value={selectedVoiceURI}
-                                onChange={(e) =>
-                                  setSelectedVoiceURI(e.target.value)
-                                }
-                                className="w-full text-[10px] font-mono bg-slate-50 border border-slate-200 text-slate-650 rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-3xs"
-                              >
-                                {voices.length === 0 ? (
-                                  <option value="">System Default Voice</option>
-                                ) : (
-                                  voices.map((voice) => (
-                                    <option
-                                      key={voice.voiceURI}
-                                      value={voice.voiceURI}
-                                    >
-                                      {voice.name
-                                        .replace(/Google/gi, "")
-                                        .trim()
-                                        .slice(0, 22)}{" "}
-                                      ({voice.lang})
-                                    </option>
-                                  ))
-                                )}
-                              </select>
                             </div>
                           </div>
                         </>
@@ -1887,7 +1884,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 </div>
 
                 {/* SCREEN CONTENT AREA */}
-                <div className="flex-1 overflow-y-auto overflow-x-hidden relative flex flex-col">
+                <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
                   {/* Google Drive / VDB Sync Status Overlay */}
                   {syncStatus.isSyncing && (
                     <div className="absolute inset-x-0 inset-y-0 bg-slate-900/85 backdrop-blur-xs flex flex-col items-center justify-center text-center p-6 z-50">
@@ -1932,7 +1929,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
                   {/* SCREEN 1: Topics List */}
                   {currentScreen === "topics" && (
-                    <div className="p-4 space-y-3 flex-1">
+                    <div className="p-4 space-y-3 flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200">
                       <div className="bg-indigo-50/50 border border-indigo-100 p-3 rounded-xl mb-2">
                         <p className="text-indigo-800 text-[11px] leading-relaxed flex items-center space-x-1 font-medium">
                           <Sparkles className="w-3.5 h-3.5 text-indigo-500" />
@@ -2336,7 +2333,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
                   {/* SCREEN 2: Articles List */}
                   {currentScreen === "articles" && (
-                    <div className="p-4 space-y-3 flex-1">
+                    <div className="p-4 space-y-3 flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200">
                       <div className="space-y-2">
                         {filteredArticles.length === 0 ? (
                           <div className="text-center py-12 text-slate-400 text-xs">
@@ -2407,37 +2404,26 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                     </div>
                   )}
 
-                  {/* SCREEN 3: Jetpack Compose Detail Player */}
-                  {currentScreen === "article-detail" && selectedArticle && (
-                    <div
-                      className="flex-1 flex flex-col h-full bg-slate-50 select-none"
-                      onTouchStart={handleTouchStart}
-                      onTouchEnd={handleTouchEnd}
-                      onMouseDown={handleMouseDown}
-                      onMouseUp={handleMouseUp}
-                    >
-                      {/* Vocabulary Swipe Trigger & Top Bar Assistant */}
-                      <div className="bg-gradient-to-r from-indigo-50/70 to-indigo-100/40 px-3 py-2 flex items-center justify-between text-[11px] text-indigo-900 border-b border-indigo-150/65 shrink-0 select-none">
-                        <div className="flex items-center space-x-1.5 font-medium">
-                          <BookOpen className="w-3.5 h-3.5 text-indigo-650 shrink-0" />
-                          <span>
-                            Swipe/Drag left for <b>Vocabulary list</b>
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setCurrentScreen("vocabulary")}
-                          className="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold px-2 py-0.5 rounded text-[9px] uppercase tracking-wider transition-all cursor-pointer shadow-3xs"
-                        >
-                          Vocab List
-                        </button>
-                      </div>
-
-                      {/* Article main view scroll holder */}
-                      <div
-                        ref={listContainerRef}
-                        className="flex-1 px-2 py-4 overflow-y-auto space-y-4 max-h-[464px] scrollbar-thin scrollbar-thumb-slate-200"
+                  <AnimatePresence mode="wait">
+                    {/* SCREEN 3: Jetpack Compose Detail Player */}
+                    {currentScreen === "article-detail" && selectedArticle && (
+                      <motion.div
+                        key="article-detail"
+                        initial={{ opacity: 0, x: -15 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: 15 }}
+                        transition={{ duration: 0.18 }}
+                        className="flex-1 flex flex-col h-full bg-slate-50 select-none"
+                        onTouchStart={handleTouchStart}
+                        onTouchEnd={handleTouchEnd}
+                        onMouseDown={handleMouseDown}
+                        onMouseUp={handleMouseUp}
                       >
+                        {/* Article main view scroll holder */}
+                        <div
+                          ref={listContainerRef}
+                          className="flex-1 px-2 py-4 overflow-y-auto space-y-4 scrollbar-thin scrollbar-thumb-slate-200"
+                        >
                         {/* Article Cover Hero Graphic */}
                         <div className="px-1 mb-2.5">
                           <img
@@ -2528,84 +2514,77 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         />
 
                         {/* Controls Row */}
-                        <div className="flex items-center justify-between gap-1 pt-1">
-                          {/* Left: Play/Pause Button */}
-                          <button
-                            onClick={togglePlay}
-                            className="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-150 hover:bg-indigo-500 hover:scale-[1.05] transition-all shrink-0 cursor-pointer"
-                          >
-                            {isPlaying ? (
-                              <Pause className="w-4.5 h-4.5 fill-current" />
-                            ) : (
-                              <Play className="w-4.5 h-4.5 fill-current ml-0.5" />
-                            )}
-                          </button>
+                        <div className="flex items-center justify-between gap-2 pt-1.5">
+                          {/* Left: Empty spacer to balance the centered group */}
+                          <div className="w-14 shrink-0" />
 
-                          {/* Right side of Play/Pause: TTS Button */}
-                          <button
-                            onClick={() => {
-                              setUseRealTts(!useRealTts);
-                              setIsPlaying(false);
-                              window.speechSynthesis.cancel();
-                            }}
-                            className={`flex items-center space-x-1 px-2 py-1 rounded-lg text-[10px] border transition-all cursor-pointer font-bold uppercase tracking-wider shrink-0 ${
-                              useRealTts
-                                ? "bg-emerald-50 border-emerald-300 text-emerald-800"
-                                : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                            }`}
-                            title="Toggles native web browser Speech Synthesis TTS feedback"
-                          >
-                            <Volume2 className="w-3 h-3" />
-                            <span>TTS</span>
-                          </button>
+                          {/* Center: Controls aligned by Play/Pause */}
+                          <div className="flex items-center justify-center gap-3 flex-1">
+                            {/* Repeat Button */}
+                            <button
+                              onClick={() => setIsRepeatEnabled(!isRepeatEnabled)}
+                              className={`flex items-center space-x-1 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider border rounded-lg transition-all cursor-pointer shrink-0 ${
+                                isRepeatEnabled
+                                  ? "bg-indigo-600 border-indigo-600 text-white shadow-xs"
+                                  : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
+                              }`}
+                              title={
+                                isRepeatEnabled
+                                  ? "Repeat mode: Enabled"
+                                  : "Repeat mode: Disabled"
+                              }
+                            >
+                              <RotateCcw
+                                className={`w-3 h-3 ${isRepeatEnabled ? "text-white" : "text-slate-500"}`}
+                              />
+                              <span>REPEAT</span>
+                            </button>
 
-                          {/* Next: Repeat Button */}
-                          <button
-                            onClick={() => setIsRepeatEnabled(!isRepeatEnabled)}
-                            className={`flex items-center space-x-1 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider border rounded-lg transition-all cursor-pointer shrink-0 ${
-                              isRepeatEnabled
-                                ? "bg-indigo-600 border-indigo-600 text-white shadow-xs"
-                                : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100"
-                            }`}
-                            title={
-                              isRepeatEnabled
-                                ? "Repeat mode: Enabled"
-                                : "Repeat mode: Disabled"
-                            }
-                          >
-                            <RotateCcw
-                              className={`w-3 h-3 ${isRepeatEnabled ? "text-white" : "text-slate-500"}`}
-                            />
-                            <span>REP</span>
-                          </button>
+                            {/* Play/Pause Button */}
+                            <button
+                              onClick={togglePlay}
+                              className="w-9 h-9 rounded-full bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-150 hover:bg-indigo-500 hover:scale-[1.05] transition-all shrink-0 cursor-pointer"
+                            >
+                              {isPlaying ? (
+                                <Pause className="w-4.5 h-4.5 fill-current" />
+                              ) : (
+                                <Play className="w-4.5 h-4.5 fill-current ml-0.5" />
+                              )}
+                            </button>
 
-                          {/* Next: Speed combo-box */}
-                          <select
-                            value={playbackSpeed}
-                            onChange={(e) =>
-                              setPlaybackSpeed(Number(e.target.value))
-                            }
-                            className="text-[10px] font-mono font-bold bg-slate-50 border border-slate-200 text-slate-500 rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-3xs shrink-0"
-                            title="Playback rate speed"
-                          >
-                            <option value={0.75}>0.75s</option>
-                            <option value={1}>1.0s</option>
-                            <option value={1.25}>1.25s</option>
-                            <option value={1.5}>1.5s</option>
-                          </select>
+                            {/* Speed combo-box */}
+                            <select
+                              value={playbackSpeed}
+                              onChange={(e) =>
+                                setPlaybackSpeed(Number(e.target.value))
+                              }
+                              className="text-[10px] font-mono font-bold bg-slate-50 border border-slate-200 text-slate-500 rounded-lg py-1 px-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-3xs shrink-0"
+                              title="Playback rate speed"
+                            >
+                              <option value={0.75}>0.75s</option>
+                              <option value={1}>1.0s</option>
+                              <option value={1.25}>1.25s</option>
+                              <option value={1.5}>1.5s</option>
+                            </select>
+                          </div>
 
-                          {/* Right side of Speed: Tracker Time Label */}
-                          <span className="text-[11px] font-mono font-bold text-slate-500 select-none shrink-0">
+                          {/* Right: Duration label aligned to the right edge */}
+                          <div className="w-14 text-[10px] md:text-[11px] font-mono font-bold text-slate-500 select-none shrink-0 text-right">
                             {formatTime(playbackMs)}
-                          </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    </motion.div>
                   )}
 
                   {/* SCREEN 5: Vocabulary list management Screen */}
                   {currentScreen === "vocabulary" && selectedArticle && (
-                    <div
+                    <motion.div
+                      key="vocabulary"
+                      initial={{ opacity: 0, x: 15 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -15 }}
+                      transition={{ duration: 0.18 }}
                       className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden select-none"
                       onTouchStart={handleTouchStart}
                       onTouchEnd={handleTouchEnd}
@@ -2969,61 +2948,72 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             {/* COMPOSITE CARD: Add a new voc item */}
                             <form
                               onSubmit={handleAddVocab}
-                              className="bg-white border border-slate-200 rounded-xl p-3 shadow-3xs space-y-2.5 mx-1.5"
+                              className="bg-white border border-slate-200 rounded-xl p-3 shadow-3xs space-y-2.5 mx-1.5 transition-all duration-300"
                             >
-                              <div className="flex items-center justify-between border-b border-slate-100 pb-1 mb-1 font-sans">
-                                <span className="text-[10px] font-extrabold text-indigo-700 tracking-wider uppercase flex items-center space-x-1">
-                                  <Plus className="w-3.5 h-3.5" />
+                              <div
+                                onClick={() => setIsInsertExpressionExpanded(!isInsertExpressionExpanded)}
+                                className="flex items-center justify-between border-b border-slate-100 pb-1 mb-1 font-sans cursor-pointer select-none group"
+                                title="Click to Collapse/Expand Insert Expression form"
+                              >
+                                <span className="text-[10px] font-extrabold text-indigo-700 tracking-wider uppercase flex items-center space-x-1 group-hover:text-indigo-500 transition-colors">
+                                  <Plus className={`w-3.5 h-3.5 transform transition-transform duration-200 ${isInsertExpressionExpanded ? 'rotate-45 text-red-500' : 'text-indigo-600'}`} />
                                   <span>Insert Expression</span>
+                                </span>
+                                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider group-hover:text-indigo-500 transition-colors">
+                                  {isInsertExpressionExpanded ? "[ Collapse ]" : "[ Expand ]"}
                                 </span>
                               </div>
 
-                              {/* Inputs row 1: Word */}
-                              <div className="space-y-1">
-                                <input
-                                  type="text"
-                                  required
-                                  value={newWord}
-                                  onChange={(e) => setNewWord(e.target.value)}
-                                  placeholder="Foreign Word (e.g., umsteigen)"
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-850 outline-none transition-all select-text"
-                                />
-                              </div>
+                              {isInsertExpressionExpanded && (
+                                <div className="space-y-2.5 pt-0.5 animate-fadeIn">
+                                  {/* Inputs row 1: Word */}
+                                  <div className="space-y-1">
+                                    <input
+                                      type="text"
+                                      required
+                                      value={newWord}
+                                      onChange={(e) => setNewWord(e.target.value)}
+                                      placeholder="Foreign Word (e.g., umsteigen)"
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-850 outline-none transition-all select-text"
+                                    />
+                                  </div>
 
-                              {/* Inputs row 2: Definition */}
-                              <div className="space-y-1">
-                                <input
-                                  type="text"
-                                  required
-                                  value={newDefinition}
-                                  onChange={(e) =>
-                                    setNewDefinition(e.target.value)
-                                  }
-                                  placeholder="Translation/Meaning (e.g., to transfer)"
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-850 outline-none transition-all select-text"
-                                />
-                              </div>
+                                  {/* Inputs row 2: Definition */}
+                                  <div className="space-y-1">
+                                    <input
+                                      type="text"
+                                      required
+                                      value={newDefinition}
+                                      onChange={(e) =>
+                                        setNewDefinition(e.target.value)
+                                      }
+                                      placeholder="Translation/Meaning (e.g., to transfer)"
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-850 outline-none transition-all select-text"
+                                    />
+                                  </div>
 
-                              {/* Inputs row 3: Example (Optional) */}
-                              <div className="space-y-1">
-                                <textarea
-                                  rows={2}
-                                  value={newExample}
-                                  onChange={(e) =>
-                                    setNewExample(e.target.value)
-                                  }
-                                  placeholder="Example sentence (optional)"
-                                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-850 outline-none transition-all resize-none select-text"
-                                />
-                              </div>
+                                  {/* Inputs row 3: Example (Optional) */}
+                                  <div className="space-y-1">
+                                    <textarea
+                                      rows={2}
+                                      value={newExample}
+                                      onChange={(e) =>
+                                        setNewExample(e.target.value)
+                                      }
+                                      placeholder="Example sentence (optional)"
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-850 outline-none transition-all resize-none select-text"
+                                    />
+                                  </div>
 
-                              {/* Submit action */}
-                              <button
-                                type="submit"
-                                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 px-3 rounded-lg text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-3xs"
-                              >
-                                Add to virtual SQLite DB
-                              </button>
+                                  {/* Submit action */}
+                                  <button
+                                    type="submit"
+                                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1.5 px-3 rounded-lg text-[10px] uppercase tracking-wider transition-all cursor-pointer shadow-3xs"
+                                  >
+                                    Add to Article
+                                  </button>
+                                </div>
+                              )}
                             </form>
 
                             {/* PRACTICE ZONE COMPONENT (Practice Section) */}
@@ -3031,7 +3021,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               <div className="flex items-center space-x-1.5 border-b border-slate-100 pb-1.5 font-sans">
                                 <Sparkles className="w-4 h-4 text-indigo-600 animate-pulse" />
                                 <span className="text-[10px] font-extrabold text-indigo-700 tracking-wider uppercase">
-                                  Practice Deck Utilities
+                                  Practice Deck
                                 </span>
                               </div>
                               <div className="grid grid-cols-2 gap-2">
@@ -3246,8 +3236,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           </>
                         )}
                       </div>
-                    </div>
+                    </motion.div>
                   )}
+                </AnimatePresence>
 
                   {/* SCREEN 4: Edit/Create Article Screen */}
                   {currentScreen === "edit-article" && (
@@ -3316,12 +3307,16 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                       const reader = new FileReader();
                                       reader.onload = (event) => {
                                         if (event.target?.result) {
-                                          setEditImageUrl(
+                                          setRawUploadedImage(
                                             event.target.result as string,
                                           );
+                                          setCropZoom(1);
+                                          setCropOffset({ x: 0, y: 0 });
                                         }
                                       };
                                       reader.readAsDataURL(file);
+                                      // Clear value so the same file can be selected again if desired
+                                      e.target.value = "";
                                     }
                                   }}
                                   className="hidden"
@@ -3461,8 +3456,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               <span>Open</span>
                             </button>
 
-                            <div className="w-[1px] h-4 bg-slate-200 self-center mx-0.5" />
-
                             {/* Formatting tags */}
                             <button
                               type="button; button-bold"
@@ -3552,6 +3545,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               )}
                             </div>
 
+                            <div className="w-[1px] h-4 bg-slate-200 self-center mx-0.5" />
+
                             <button
                               type="button"
                               onClick={() => setEditorFontSize((prev) => Math.max(10, prev - 1))}
@@ -3571,8 +3566,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             >
                               <Plus className="w-3.5 h-3.5" />
                             </button>
-
-                            <div className="w-[1px] h-4 bg-slate-200 self-center mx-0.5" />
                           </div>
 
                           <textarea
@@ -3652,6 +3645,90 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           </button>
                         </div>
                       </div>
+                    </div>
+                  )}
+
+                  {/* SCREEN 6: Settings Screen */}
+                  {currentScreen === "settings" && (
+                    <div className="flex-1 flex flex-col h-full bg-slate-50 select-none overflow-y-auto p-4 space-y-4">
+                      {/* VDB BACKUP DATA SHARING */}
+                      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-3xs space-y-3">
+                        <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
+                          <HardDrive className="w-4 h-4 text-indigo-600 shrink-0" />
+                          <span className="text-[11px] font-extrabold text-slate-800 tracking-wider uppercase">
+                            VDB Backup Data Sharing
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 leading-normal">
+                          Safely export all your learning topics, articles, and vocabulary database to a <code>.vdb</code> file, or restore from a previously exported backup.
+                        </p>
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={handleExportVdb}
+                            className="flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs transition-colors cursor-pointer"
+                            title="Backup database to a .vdb compressed file and save locally"
+                          >
+                            <Upload className="w-3.5 h-3.5 shrink-0" />
+                            <span>Export Backup</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => backupFileInputRef.current?.click()}
+                            className="flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs transition-colors cursor-pointer"
+                            title="Restore database by importing a .vdb backup file"
+                          >
+                            <Download className="w-3.5 h-3.5 shrink-0" />
+                            <span>Import Backup</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* GOOGLE DRIVE SYNC */}
+                      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-3xs space-y-3">
+                        <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
+                          <Cloud className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span className="text-[11px] font-extrabold text-slate-800 tracking-wider uppercase">
+                            Google Drive Sync
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 leading-normal">
+                          Sync your data securely to the cloud. Link your Google account to enable auto-backup or manually trigger uploads and downloads.
+                        </p>
+                        <div className="space-y-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setShowSyncSetupDialog(true)}
+                            className="w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs transition-colors cursor-pointer"
+                            title="Link your Google Account for cloud storage backups"
+                          >
+                            <Cloud className="w-3.5 h-3.5 shrink-0" />
+                            <span>Account Synchronization Settings</span>
+                          </button>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleGoogleDriveSync('upload')}
+                              className="flex items-center justify-center space-x-1.5 py-2 px-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[11px] transition-colors cursor-pointer"
+                              title="Manually upload data from phone into secure Google Drive storage"
+                            >
+                              <CloudUpload className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>Manual Upload</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleGoogleDriveSync('download')}
+                              className="flex items-center justify-center space-x-1.5 py-2 px-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[11px] transition-colors cursor-pointer"
+                              title="Manually download data from Google Drive and restore local phone state"
+                            >
+                              <CloudDownload className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>Manual Download</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+
+
                     </div>
                   )}
 
@@ -3752,9 +3829,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           <button
                             type="button"
                             onClick={() => setShowIntroDialog(false)}
-                            className="px-4 py-1.5 rounded-xl bg-indigo-650 hover:bg-indigo-750 text-white text-xs font-bold transition-all cursor-pointer shadow-sm shadow-indigo-150"
+                            className="px-4 py-1.5 rounded-xl bg-[#f9f9fc] hover:bg-[#eef0f6] text-[#75787a] text-xs font-bold transition-all cursor-pointer border border-slate-200/60 shadow-sm"
                           >
-                            Close
+                            OK
                           </button>
                         </div>
                       </div>
@@ -3793,7 +3870,16 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             type="button"
                             onClick={() => {
                               setShowExitDialog(false);
-                              setCurrentScreen("exited");
+                              if (typeof window !== "undefined") {
+                                try {
+                                  // Attempt browser tab or window closure
+                                  window.close();
+                                } catch (e) {}
+                                try {
+                                  // Fallback closure indicator or redirect
+                                  window.location.href = "about:blank";
+                                } catch (e) {}
+                              }
                             }}
                             className="px-4 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all cursor-pointer shadow-sm shadow-red-150"
                           >
@@ -3874,7 +3960,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           <button
                             type="button"
                             onClick={() => setShowSyncSetupDialog(false)}
-                            className="px-4 py-1.5 rounded-xl bg-indigo-650 hover:bg-indigo-750 text-white text-xs font-bold transition-all cursor-pointer shadow-sm shadow-indigo-150"
+                            className="px-4 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-xs font-bold transition-all cursor-pointer border border-slate-200/65 shadow-xs"
+                            style={{ color: '#898585' }}
                           >
                             Close
                           </button>
@@ -3882,9 +3969,103 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       </div>
                     </div>
                   )}
+
+                  {/* Cover Image Cropping Overlay */}
+                  {rawUploadedImage && (
+                    <div
+                      id="cover-crop-dialog-overlay"
+                      className="absolute inset-0 bg-slate-900/60 z-55 flex items-center justify-center p-4 backdrop-blur-xs"
+                    >
+                      <div
+                        id="cover-crop-dialog"
+                        className="bg-white rounded-3xl p-4.5 shadow-xl border border-slate-250 w-full max-w-[280px] space-y-3.5"
+                      >
+                        <div className="space-y-1 text-left">
+                          <h3 className="text-xs font-black text-slate-900 flex items-center gap-1.5 uppercase tracking-wide">
+                            <Crop className="w-4 h-4 text-indigo-600 shrink-0" />
+                            Crop Cover Image
+                          </h3>
+                          <p className="text-[10px] text-slate-500 leading-normal">
+                            Drag image to center, and scale using the slider to fit.
+                          </p>
+                        </div>
+
+                        {/* Drag and drop panel area */}
+                        <div
+                          onMouseDown={handleCropMouseDown}
+                          onMouseMove={handleCropMouseMove}
+                          onMouseUp={handleCropMouseUp}
+                          onMouseLeave={handleCropMouseUp}
+                          onTouchStart={handleCropTouchStart}
+                          onTouchMove={handleCropTouchMove}
+                          onTouchEnd={handleCropTouchEnd}
+                          className="relative w-full h-36 bg-slate-950 border border-slate-200 rounded-2xl overflow-hidden cursor-move select-none shadow-inner flex items-center justify-center"
+                        >
+                          <img
+                            src={rawUploadedImage}
+                            alt="Cropping Dynamic"
+                            referrerPolicy="no-referrer"
+                            style={{
+                              transform: `translate(${cropOffset.x}px, ${cropOffset.y}px) scale(${cropZoom})`,
+                              transformOrigin: "center center",
+                            }}
+                            className="w-full h-full object-contain pointer-events-none"
+                          />
+                          
+                          {/* Visible cropping outline border overlay */}
+                          <div className="absolute inset-0 border-2 border-indigo-600 rounded-2xl pointer-events-none opacity-90 shadow-[0_0_0_9999px_rgba(15,23,42,0.45)]" />
+                          <div className="absolute bottom-1.5 left-1/2 transform -translate-x-1/2 bg-slate-900/85 text-white font-sans text-[7px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-widest pointer-events-none">
+                            Drag to pan
+                          </div>
+                        </div>
+
+                        {/* Slider Controller */}
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[8px] text-slate-400 font-extrabold uppercase tracking-widest">
+                            <span>Zoom Style</span>
+                            <span className="text-indigo-600 font-mono text-[9px]">{cropZoom.toFixed(2)}x</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="1"
+                            max="3.5"
+                            step="0.05"
+                            value={cropZoom}
+                            onChange={(e) => setCropZoom(parseFloat(e.target.value))}
+                            className="w-full accent-indigo-600 h-1 bg-slate-100 rounded-lg appearance-none cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Save Cancel triggers */}
+                        <div className="flex items-center space-x-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setRawUploadedImage(null)}
+                            className="flex-1 px-3 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-[#898585] text-[11px] font-extrabold transition-all cursor-pointer border border-slate-200/65 shadow-3xs"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSaveCrop}
+                            className="flex-1 px-3 py-1.5 rounded-xl text-white text-[11px] font-extrabold transition-all cursor-pointer shadow-sm"
+                            style={{ backgroundColor: '#c155a6' }}
+                          >
+                            Apply Crop
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Hidden input for VDB backups */}
+                  <input
+                    type="file"
+                    ref={backupFileInputRef}
+                    onChange={handleImportVdb}
+                    accept=".vdb,.json"
+                    className="hidden"
+                  />
                 </div>
-              </>
-            )}
     </div>
   );
 };
