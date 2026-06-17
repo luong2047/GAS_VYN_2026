@@ -347,6 +347,16 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [cameFromSearch, setCameFromSearch] = useState(false);
 
+  // Splash Screen State
+  const [showSplash, setShowSplash] = useState<boolean>(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2800);
+    return () => clearTimeout(timer);
+  }, []);
+
   // VDB backup and manual Google Drive sync states
   const backupFileInputRef = useRef<HTMLInputElement>(null);
   const [vdbStatus, setVdbStatus] = useState<{ type: 'success' | 'error' | 'loading' | null, message: string }>({ type: null, message: "" });
@@ -839,13 +849,22 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     setEditingVocabId(null);
   };
 
+  // Get active voice URI for selected article (falls back to global selectedVoiceURI)
+  const getActiveVoiceURI = () => {
+    if (!selectedArticle) return selectedVoiceURI || "";
+    const saved = localStorage.getItem("article_voice_" + selectedArticle.id);
+    if (saved) return saved;
+    return selectedVoiceURI || "";
+  };
+
   // Word reader for single vocabulary elements
   const speakSingleWord = (wordText: string) => {
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(wordText);
-    if (selectedVoiceURI && voices.length > 0) {
-      const foundVoice = voices.find((v) => v.voiceURI === selectedVoiceURI);
+    const activeVoiceURI = getActiveVoiceURI();
+    if (activeVoiceURI && voices.length > 0) {
+      const foundVoice = voices.find((v) => v.voiceURI === activeVoiceURI);
       if (foundVoice) {
         utterance.voice = foundVoice;
       }
@@ -880,8 +899,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(currentItem.word);
 
-      if (selectedVoiceURI && voices.length > 0) {
-        const foundVoice = voices.find((v) => v.voiceURI === selectedVoiceURI);
+      const activeVoiceURI = getActiveVoiceURI();
+      if (activeVoiceURI && voices.length > 0) {
+        const foundVoice = voices.find((v) => v.voiceURI === activeVoiceURI);
         if (foundVoice) {
           utterance.voice = foundVoice;
         }
@@ -1378,8 +1398,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
     const utterance = new SpeechSynthesisUtterance(fullText);
 
-    if (selectedVoiceURI && voices.length > 0) {
-      const foundVoice = voices.find((v) => v.voiceURI === selectedVoiceURI);
+    const activeVoiceURI = getActiveVoiceURI();
+    if (activeVoiceURI && voices.length > 0) {
+      const foundVoice = voices.find((v) => v.voiceURI === activeVoiceURI);
       if (foundVoice) {
         utterance.voice = foundVoice;
       }
@@ -1473,7 +1494,82 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   };
 
   return (
-    <div className="w-full min-h-screen bg-slate-50 text-slate-850 flex flex-col relative overflow-hidden select-text">
+    <div className="w-full h-screen h-[100dvh] bg-slate-50 text-slate-850 flex flex-col relative overflow-hidden select-text">
+      {/* Splash Screen */}
+      <AnimatePresence>
+        {showSplash && (
+          <motion.div
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.5, ease: "easeInOut" }}
+            className="absolute inset-0 bg-white z-50 flex flex-col items-center justify-between py-12 px-6"
+          >
+            <div className="flex-1 flex flex-col items-center justify-center">
+              <motion.div
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: [0.8, 1.05, 1], opacity: 1 }}
+                transition={{ duration: 0.8, ease: "easeOut" }}
+                className="w-44 h-44 md:w-48 md:h-48 bg-slate-50 rounded-full flex items-center justify-center p-2 shadow-sm border border-slate-100/50"
+              >
+                <img
+                  src="/src/assets/images/rabbit_carrot_splash_1781691897305.jpg"
+                  alt="Rabbit hugging a carrot"
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-contain rounded-full"
+                />
+              </motion.div>
+
+              <motion.h1
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.4, duration: 0.6 }}
+                className="mt-6 text-2xl font-extrabold text-slate-800 tracking-tight text-center font-sans"
+              >
+                VYN LingoBunny
+              </motion.h1>
+
+              <motion.p
+                initial={{ y: 20, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                transition={{ delay: 0.6, duration: 0.6 }}
+                className="mt-2 text-sm text-slate-400 text-center font-medium max-w-xs font-sans"
+              >
+                Your adorable vocabulary companion
+              </motion.p>
+            </div>
+
+            {/* Bottom loading indicator */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.8 }}
+              className="flex flex-col items-center space-y-2.5 pb-4"
+            >
+              <div className="flex space-x-1.5">
+                {[0, 1, 2].map((i) => (
+                  <motion.div
+                    key={i}
+                    animate={{
+                      y: [0, -6, 0],
+                    }}
+                    transition={{
+                      duration: 0.6,
+                      repeat: Infinity,
+                      delay: i * 0.15,
+                      ease: "easeInOut",
+                    }}
+                    className="w-2.5 h-2.5 rounded-full bg-emerald-500"
+                  />
+                ))}
+              </div>
+              <span className="text-[10px] font-bold text-slate-400 tracking-widest uppercase font-mono">
+                Initializing language deck...
+              </span>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Hidden React audio playback synchronizer */}
       <audio
         ref={audioPlayerRef}
@@ -1875,6 +1971,34 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                   <span>A+</span>
                                 </button>
                               </div>
+                            </div>
+
+                            {/* Group 2: Language Voice Combo Box */}
+                            <div className="text-left pt-1 border-t border-slate-100">
+                              <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1 font-sans">
+                                TTS Voice
+                              </span>
+                              <select
+                                value={getActiveVoiceURI()}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (selectedArticle) {
+                                    localStorage.setItem("article_voice_" + selectedArticle.id, val);
+                                  }
+                                  setSelectedVoiceURI(val);
+                                }}
+                                className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2 py-1.5 text-[10.5px] font-semibold text-slate-800 outline-none transition-all cursor-pointer"
+                              >
+                                {voices.length === 0 ? (
+                                  <option value="">No voices available</option>
+                                ) : (
+                                  voices.map((voice) => (
+                                    <option key={voice.voiceURI} value={voice.voiceURI}>
+                                      {voice.name} ({voice.lang})
+                                    </option>
+                                  ))
+                                )}
+                              </select>
                             </div>
                           </div>
                         </>
