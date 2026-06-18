@@ -1,0 +1,9 @@
+{
+  "icon": "vyn_icon.png",
+  "name": "Android Language Learning Architecture Sandbox",
+  "packageName": "com.vyn.learning.sandbox",
+  "build": {
+    "target": "apk",
+    "iconPath": "vyn_icon.png"
+  }
+}

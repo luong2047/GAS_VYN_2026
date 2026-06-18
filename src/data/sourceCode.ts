@@ -2,7 +2,7 @@ export interface SourceFile {
   name: string;
   path: string;
   language: string;
-  category: 'database' | 'parser' | 'ui' | 'sync';
+  category: 'database' | 'parser' | 'ui' | 'sync' | 'config';
   code: string;
   description: string;
 }
@@ -749,5 +749,54 @@ fun formatTimestamp(ms: Long): String {
     return String.format("%02d:%02d.%03d", minutes, seconds, remainderMs)
 }
 `
+  },
+  {
+    name: "AndroidManifest.xml",
+    path: "app/src/main/AndroidManifest.xml",
+    language: "xml",
+    category: "config",
+    description: "Android Application Manifest declaring essential device permissions (Internet, Disk/Files, and Microphone) to support online cloud TTS, local Room database caching, and speech voice interactions.",
+    code: `<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.langapp">
+
+    <!-- Internet permission for Google Translate TTS & Drive Sync -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Microphone permission for speech-to-text / accent analysis -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Storage permissions for caching subtitle audio files and Room DB exports -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.LanguageLearning">
+        
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.LanguageLearning.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Background Sync Worker Service -->
+        <service
+            android:name="androidx.work.impl.background.systemalarm.SystemAlarmService"
+            android:enabled="true"
+            android:exported="false" />
+            
+    </application>
+</manifest>`
   }
 ];

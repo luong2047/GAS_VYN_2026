@@ -9,7 +9,7 @@ interface CodeExplorerProps {
 export const CodeExplorer: React.FC<CodeExplorerProps> = ({ sourceFiles }) => {
   const [selectedFile, setSelectedFile] = useState<SourceFile>(sourceFiles[0]);
   const [copied, setCopied] = useState(false);
-  const [activeCategory, setActiveCategory] = useState<'all' | 'database' | 'parser' | 'ui' | 'sync'>('all');
+  const [activeCategory, setActiveCategory] = useState<'all' | 'database' | 'parser' | 'ui' | 'sync' | 'config'>('all');
 
   const handleCopy = (code: string) => {
     navigator.clipboard.writeText(code);
@@ -38,7 +38,7 @@ export const CodeExplorer: React.FC<CodeExplorerProps> = ({ sourceFiles }) => {
 
         {/* Categories selector */}
         <div className="flex flex-wrap gap-1 bg-[#fbfcfd] p-1 rounded-xl border border-slate-200">
-          {(['all', 'database', 'parser', 'ui', 'sync'] as const).map(cat => (
+          {(['all', 'database', 'parser', 'ui', 'sync', 'config'] as const).map(cat => (
             <button
               key={cat}
               onClick={() => {
@@ -79,13 +79,15 @@ export const CodeExplorer: React.FC<CodeExplorerProps> = ({ sourceFiles }) => {
               >
                 <div className="flex items-center space-x-2.5 truncate">
                   <FileText className={`w-4 h-4 shrink-0 ${
-                    file.category === 'database' && 'text-emerald-600'
+                    file.category === 'database' ? 'text-emerald-600' : ''
                   } ${
-                    file.category === 'parser' && 'text-amber-500'
+                    file.category === 'parser' ? 'text-amber-500' : ''
                   } ${
-                    file.category === 'ui' && 'text-purple-500'
+                    file.category === 'ui' ? 'text-purple-500' : ''
                   } ${
-                    file.category === 'sync' && 'text-sky-500'
+                    file.category === 'sync' ? 'text-sky-500' : ''
+                  } ${
+                    file.category === 'config' ? 'text-rose-500' : ''
                   }`} />
                   <div className="truncate">
                     <p className={`truncate ${selectedFile.name === file.name ? 'text-indigo-905' : 'text-slate-800'}`}>{file.name}</p>

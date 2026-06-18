@@ -684,6 +684,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   // Practice & Test States
   const [isReadingAll, setIsReadingAll] = useState(false);
+  const isReadingAllRef = useRef(false);
   const [autoReadIndex, setAutoReadIndex] = useState<number>(-1);
   const [isTesting, setIsTesting] = useState(false);
   const [testQuestions, setTestQuestions] = useState<TestQuestion[]>([]);
@@ -861,15 +862,17 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   // Speaks using the online Google Translate TTS service (which has high-fidelity internet pronunciation and bypasses mobile browser Web Speech API blocking)
   const playOnlineTts = (text: string, onEnd?: () => void, onError?: () => void) => {
-    // 1. Pause and reset standard active audio, if any
-    if (onlineTtsAudioRef.current) {
-      try {
-        onlineTtsAudioRef.current.pause();
-      } catch (err) {
-        console.warn("Error pausing active audio:", err);
-      }
-      onlineTtsAudioRef.current.src = "";
-      onlineTtsAudioRef.current = null;
+    const audio = onlineTtsAudioRef.current;
+    if (!audio) {
+      console.warn("onlineTtsAudioRef is not mounted yet, fallback to system tts");
+      trySpeakSystemTts(text, onEnd, onError);
+      return;
+    }
+
+    try {
+      audio.pause();
+    } catch (err) {
+      console.warn("Error pausing active audio:", err);
     }
 
     // Cancel any standard background web speechSynthesis process as well to prevent overlaps
@@ -898,32 +901,32 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     const truncatedText = text.length > 250 ? text.slice(0, 250) + "..." : text;
     const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${encodeURIComponent(truncatedText)}`;
 
-    // Create standard HTML5 Audio which is beautifully permitted on user gesture click event on mobiles
-    const audio = new Audio(url);
-    onlineTtsAudioRef.current = audio;
-
-    if (onEnd) {
-      audio.onended = () => {
-        if (onlineTtsAudioRef.current === audio) {
-          onlineTtsAudioRef.current = null;
-        }
-        onEnd();
-      };
-    }
+    // Set source and listeners dynamically
+    audio.src = url;
     
-    if (onError) {
-      audio.onerror = () => {
-        if (onlineTtsAudioRef.current === audio) {
-          onlineTtsAudioRef.current = null;
-        }
-        onError();
-      };
-    }
-
-    audio.play().catch((err) => {
-      console.warn("Online Google Translate TTS played blocked or failed, fallback to system voices:", err);
+    audio.onended = () => {
+      audio.onended = null;
+      audio.onerror = null;
+      if (onEnd) onEnd();
+    };
+    
+    audio.onerror = () => {
+      audio.onended = null;
+      audio.onerror = null;
+      console.warn("Online Google Translate TTS played blocked or failed, fallback to system voices");
       trySpeakSystemTts(text, onEnd, onError);
-    });
+    };
+
+    audio.load();
+    const playPromise = audio.play();
+    if (playPromise !== undefined) {
+      playPromise.catch((err) => {
+        console.warn("Audio.play failed:", err);
+        audio.onended = null;
+        audio.onerror = null;
+        trySpeakSystemTts(text, onEnd, onError);
+      });
+    }
   };
 
   // Graceful offline fallback using Web Speech API Synthesis
@@ -970,6 +973,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   const stopAutoReading = () => {
     setIsReadingAll(false);
+    isReadingAllRef.current = false;
     setAutoReadIndex(-1);
     if (autoReadTimeoutRef.current) {
       clearTimeout(autoReadTimeoutRef.current);
@@ -980,7 +984,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         onlineTtsAudioRef.current.pause();
       } catch (err) {}
       onlineTtsAudioRef.current.src = "";
-      onlineTtsAudioRef.current = null;
     }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -988,26 +991,39 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   };
 
   const playVocabularyAt = (index: number, vocabList: VocabularyItem[]) => {
+    if (!isReadingAllRef.current) {
+      return;
+    }
+
     if (index < 0 || index >= vocabList.length) {
       stopAutoReading();
       return;
     }
 
+    if (autoReadTimeoutRef.current) {
+      clearTimeout(autoReadTimeoutRef.current);
+      autoReadTimeoutRef.current = null;
+    }
+
     setAutoReadIndex(index);
     const currentItem = vocabList[index];
 
+    let hasTriggeredNext = false;
+    const triggerNext = () => {
+      if (hasTriggeredNext) return;
+      hasTriggeredNext = true;
+
+      if (!isReadingAllRef.current) return;
+
+      autoReadTimeoutRef.current = setTimeout(() => {
+        playVocabularyAt(index + 1, vocabList);
+      }, 1500);
+    };
+
     playOnlineTts(
       currentItem.word,
-      () => {
-        autoReadTimeoutRef.current = setTimeout(() => {
-          playVocabularyAt(index + 1, vocabList);
-        }, 1500);
-      },
-      () => {
-        autoReadTimeoutRef.current = setTimeout(() => {
-          playVocabularyAt(index + 1, vocabList);
-        }, 1500);
-      }
+      triggerNext,
+      triggerNext
     );
   };
 
@@ -1019,10 +1035,10 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       stopAutoReading();
     } else {
       setIsReadingAll(true);
+      isReadingAllRef.current = true;
       if (onlineTtsAudioRef.current) {
         try { onlineTtsAudioRef.current.pause(); } catch (err) {}
         onlineTtsAudioRef.current.src = "";
-        onlineTtsAudioRef.current = null;
       }
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
@@ -1228,7 +1244,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       if (onlineTtsAudioRef.current) {
         try { onlineTtsAudioRef.current.pause(); } catch (err) {}
         onlineTtsAudioRef.current.src = "";
-        onlineTtsAudioRef.current = null;
       }
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
@@ -1776,6 +1791,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
           }
         }}
       />
+
+      {/* Dedicated DOM-mounted audio element for online TTS playing to bypass mobile browser restrictions */}
+      <audio
+        ref={onlineTtsAudioRef}
+        preload="auto"
+        className="hidden"
+      />
                 {/* Header Layout (TopAppBar) */}
                 <div className="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 shadow-xs relative z-40">
                   <div className="flex items-center space-x-2">
@@ -2083,75 +2105,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 <span>Save Plain Text</span>
                               </button>
                             </div>
-
-                            {/* Group 3: Real playback vs TTS audio */}
-                            <div className="border-t border-slate-150 pt-2" />
-                            <div>
-                              <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
-                                Audio Mode
-                              </span>
-                              <div className="flex flex-col space-y-1.5">
-                                <label className="flex items-center space-x-2 bg-slate-50 border border-slate-200/85 p-2 rounded-lg cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={useRealTts}
-                                    onChange={(e) => {
-                                      setUseRealTts(e.target.checked);
-                                      setIsPlaying(false);
-                                      if (onlineTtsAudioRef.current) {
-                                        try { onlineTtsAudioRef.current.pause(); } catch (err) {}
-                                        onlineTtsAudioRef.current.src = "";
-                                        onlineTtsAudioRef.current = null;
-                                      }
-                                      if (audioPlayerRef.current) {
-                                        audioPlayerRef.current.pause();
-                                      }
-                                      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-                                        window.speechSynthesis.cancel();
-                                      }
-                                    }}
-                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
-                                  />
-                                  <span className="text-[9px] font-bold text-slate-700 uppercase tracking-tight">Use Internet Text-To-Speech</span>
-                                </label>
-
-                                {useRealTts && (
-                                  <div className="space-y-1">
-                                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wide">
-                                      Speech Voice Accent
-                                    </span>
-                                    <select
-                                      value={getActiveVoiceURI()}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        if (selectedArticle) {
-                                          localStorage.setItem("article_voice_" + selectedArticle.id, val);
-                                        }
-                                        setSelectedVoiceURI(val);
-                                      }}
-                                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2 py-1 text-[9.5px] font-semibold text-slate-800 outline-none cursor-pointer"
-                                    >
-                                      <option value="online-en">Online English Voice (US)</option>
-                                      <option value="online-en-gb">Online English Voice (UK)</option>
-                                      <option value="online-es">Online Spanish Voice (ES)</option>
-                                      <option value="online-fr">Online French Voice (FR)</option>
-                                      <option value="online-ja">Online Japanese Voice (JP)</option>
-                                      <option value="online-zh">Online Chinese Voice (CN)</option>
-                                      <option value="online-vi">Online Vietnamese Voice (VN)</option>
-                                      {voices.length > 0 && (
-                                        <optgroup label="System Voices">
-                                          {voices.map((voice) => (
-                                            <option key={voice.voiceURI} value={voice.voiceURI}>
-                                              {voice.name} ({voice.lang})
-                                            </option>
-                                          ))}
-                                        </optgroup>
-                                      )}
-                                    </select>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
                           </div>
                         </>
                       )}
@@ -2234,39 +2187,72 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               </div>
                             </div>
 
-                            {/* Group 2: Language Voice Combo Box */}
-                            <div className="text-left pt-1 border-t border-slate-100">
+                            {/* Group 2: Audio Mode / TTS mode */}
+                            <div className="text-left pt-1.5 border-t border-slate-100 space-y-2">
                               <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1 font-sans">
-                                TTS Voice
+                                TTS Mode
                               </span>
-                              <select
-                                value={getActiveVoiceURI()}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  if (selectedArticle) {
-                                    localStorage.setItem("article_voice_" + selectedArticle.id, val);
-                                  }
-                                  setSelectedVoiceURI(val);
-                                }}
-                                className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2 py-1.5 text-[10.5px] font-semibold text-slate-800 outline-none transition-all cursor-pointer"
-                              >
-                                <option value="online-en">Online English Voice (US)</option>
-                                <option value="online-en-gb">Online English Voice (UK)</option>
-                                <option value="online-es">Online Spanish Voice (ES)</option>
-                                <option value="online-fr">Online French Voice (FR)</option>
-                                <option value="online-ja">Online Japanese Voice (JP)</option>
-                                <option value="online-zh">Online Chinese Voice (CN)</option>
-                                <option value="online-vi">Online Vietnamese Voice (VN)</option>
-                                {voices.length > 0 && (
-                                  <optgroup label="System Voices">
-                                    {voices.map((voice) => (
-                                      <option key={voice.voiceURI} value={voice.voiceURI}>
-                                        {voice.name} ({voice.lang})
-                                      </option>
-                                    ))}
-                                  </optgroup>
+                              <div className="flex flex-col space-y-1.5">
+                                <label className="flex items-center space-x-2 bg-slate-50 border border-slate-150 p-2 rounded-lg cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={useRealTts}
+                                    onChange={(e) => {
+                                      setUseRealTts(e.target.checked);
+                                      setIsPlaying(false);
+                                      if (onlineTtsAudioRef.current) {
+                                        try { onlineTtsAudioRef.current.pause(); } catch (err) {}
+                                        onlineTtsAudioRef.current.src = "";
+                                      }
+                                      if (audioPlayerRef.current) {
+                                        audioPlayerRef.current.pause();
+                                      }
+                                      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+                                        window.speechSynthesis.cancel();
+                                      }
+                                    }}
+                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                                  />
+                                  <span className="text-[9px] font-bold text-slate-705 uppercase tracking-tight">Use Internet Text-To-Speech</span>
+                                </label>
+
+                                {useRealTts && (
+                                  <div className="space-y-1">
+                                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wide text-left">
+                                      Speech Voice Accent
+                                    </span>
+                                    <select
+                                      value={getActiveVoiceURI()}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (selectedArticle) {
+                                          localStorage.setItem("article_voice_" + selectedArticle.id, val);
+                                        }
+                                        setSelectedVoiceURI(val);
+                                      }}
+                                      className="w-full bg-slate-50 border border-slate-205 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2 py-1 text-[9.5px] font-semibold text-slate-800 outline-none cursor-pointer font-sans"
+                                    >
+                                      <option value="online-en">Online English Voice (US)</option>
+                                      <option value="online-en-gb">Online English Voice (UK)</option>
+                                      <option value="online-es">Online Spanish Voice (ES)</option>
+                                      <option value="online-fr">Online French Voice (FR)</option>
+                                      <option value="online-ja">Online Japanese Voice (JP)</option>
+                                      <option value="online-zh">Online Chinese Voice (CN)</option>
+                                      <option value="online-vi">Online Vietnamese Voice (VN)</option>
+                                      <option value="online-ko">Online Korean Voice (KR)</option>
+                                      {voices.length > 0 && (
+                                        <optgroup label="System Voices">
+                                          {voices.map((voice) => (
+                                            <option key={voice.voiceURI} value={voice.voiceURI}>
+                                              {voice.name} ({voice.lang})
+                                            </option>
+                                          ))}
+                                        </optgroup>
+                                      )}
+                                    </select>
+                                  </div>
                                 )}
-                              </select>
+                              </div>
                             </div>
                           </div>
                         </>
