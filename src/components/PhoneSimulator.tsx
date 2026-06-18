@@ -566,7 +566,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const startPickerRef = useRef<HTMLInputElement>(null);
   const endPickerRef = useRef<HTMLInputElement>(null);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>("");
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>("online-en");
+  const onlineTtsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const [editTitle, setEditTitle] = useState("");
   const [editType, setEditType] = useState<"subtitle">("subtitle");
@@ -852,25 +853,117 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   // Get active voice URI for selected article (falls back to global selectedVoiceURI)
   const getActiveVoiceURI = () => {
-    if (!selectedArticle) return selectedVoiceURI || "";
+    if (!selectedArticle) return selectedVoiceURI || "online-en";
     const saved = localStorage.getItem("article_voice_" + selectedArticle.id);
     if (saved) return saved;
-    return selectedVoiceURI || "";
+    return selectedVoiceURI || "online-en";
+  };
+
+  // Speaks using the online Google Translate TTS service (which has high-fidelity internet pronunciation and bypasses mobile browser Web Speech API blocking)
+  const playOnlineTts = (text: string, onEnd?: () => void, onError?: () => void) => {
+    // 1. Pause and reset standard active audio, if any
+    if (onlineTtsAudioRef.current) {
+      try {
+        onlineTtsAudioRef.current.pause();
+      } catch (err) {
+        console.warn("Error pausing active audio:", err);
+      }
+      onlineTtsAudioRef.current.src = "";
+      onlineTtsAudioRef.current = null;
+    }
+
+    // Cancel any standard background web speechSynthesis process as well to prevent overlaps
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+
+    const activeVoiceURI = getActiveVoiceURI();
+    let lang = "en";
+
+    // Detect language code
+    if (activeVoiceURI.startsWith("online-")) {
+      const parts = activeVoiceURI.split("-");
+      if (parts.length >= 2) {
+        lang = parts[1]; // 'en', 'es', etc.
+        if (parts.length === 3 && parts[1] === "en" && parts[2] === "gb") {
+          lang = "en-gb";
+        }
+      }
+    } else {
+      const foundVoice = voices.find((v) => v.voiceURI === activeVoiceURI);
+      lang = foundVoice ? foundVoice.lang.split("-")[0] : "en";
+    }
+
+    // Limit text length for a single Google Translate query to ~250 characters (extremely safe for words and phrases)
+    const truncatedText = text.length > 250 ? text.slice(0, 250) + "..." : text;
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=${lang}&client=tw-ob&q=${encodeURIComponent(truncatedText)}`;
+
+    // Create standard HTML5 Audio which is beautifully permitted on user gesture click event on mobiles
+    const audio = new Audio(url);
+    onlineTtsAudioRef.current = audio;
+
+    if (onEnd) {
+      audio.onended = () => {
+        if (onlineTtsAudioRef.current === audio) {
+          onlineTtsAudioRef.current = null;
+        }
+        onEnd();
+      };
+    }
+    
+    if (onError) {
+      audio.onerror = () => {
+        if (onlineTtsAudioRef.current === audio) {
+          onlineTtsAudioRef.current = null;
+        }
+        onError();
+      };
+    }
+
+    audio.play().catch((err) => {
+      console.warn("Online Google Translate TTS played blocked or failed, fallback to system voices:", err);
+      trySpeakSystemTts(text, onEnd, onError);
+    });
+  };
+
+  // Graceful offline fallback using Web Speech API Synthesis
+  const trySpeakSystemTts = (text: string, onEnd?: () => void, onError?: () => void) => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      if (onEnd) onEnd();
+      return;
+    }
+    
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      const activeVoiceURI = getActiveVoiceURI();
+
+      if (!activeVoiceURI.startsWith("online-") && voices.length > 0) {
+        const foundVoice = voices.find((v) => v.voiceURI === activeVoiceURI);
+        if (foundVoice) {
+          utterance.voice = foundVoice;
+        }
+      } else if (voices.length > 0) {
+        // Find best local voice matching language
+        const parts = activeVoiceURI.split("-");
+        const prefLang = parts.length >= 2 ? parts[1] : "en";
+        const matchedVoice = voices.find((v) => v.lang.toLowerCase().startsWith(prefLang));
+        if (matchedVoice) {
+          utterance.voice = matchedVoice;
+        }
+      }
+
+      if (onEnd) utterance.onend = onEnd;
+      if (onError) utterance.onerror = onError;
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      if (onEnd) onEnd();
+    }
   };
 
   // Word reader for single vocabulary elements
   const speakSingleWord = (wordText: string) => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(wordText);
-    const activeVoiceURI = getActiveVoiceURI();
-    if (activeVoiceURI && voices.length > 0) {
-      const foundVoice = voices.find((v) => v.voiceURI === activeVoiceURI);
-      if (foundVoice) {
-        utterance.voice = foundVoice;
-      }
-    }
-    window.speechSynthesis.speak(utterance);
+    playOnlineTts(wordText);
   };
 
   const autoReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -881,6 +974,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     if (autoReadTimeoutRef.current) {
       clearTimeout(autoReadTimeoutRef.current);
       autoReadTimeoutRef.current = null;
+    }
+    if (onlineTtsAudioRef.current) {
+      try {
+        onlineTtsAudioRef.current.pause();
+      } catch (err) {}
+      onlineTtsAudioRef.current.src = "";
+      onlineTtsAudioRef.current = null;
     }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -896,36 +996,19 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     setAutoReadIndex(index);
     const currentItem = vocabList[index];
 
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(currentItem.word);
-
-      const activeVoiceURI = getActiveVoiceURI();
-      if (activeVoiceURI && voices.length > 0) {
-        const foundVoice = voices.find((v) => v.voiceURI === activeVoiceURI);
-        if (foundVoice) {
-          utterance.voice = foundVoice;
-        }
+    playOnlineTts(
+      currentItem.word,
+      () => {
+        autoReadTimeoutRef.current = setTimeout(() => {
+          playVocabularyAt(index + 1, vocabList);
+        }, 1500);
+      },
+      () => {
+        autoReadTimeoutRef.current = setTimeout(() => {
+          playVocabularyAt(index + 1, vocabList);
+        }, 1500);
       }
-
-      utterance.onend = () => {
-        autoReadTimeoutRef.current = setTimeout(() => {
-          playVocabularyAt(index + 1, vocabList);
-        }, 1500);
-      };
-
-      utterance.onerror = () => {
-        autoReadTimeoutRef.current = setTimeout(() => {
-          playVocabularyAt(index + 1, vocabList);
-        }, 1500);
-      };
-
-      window.speechSynthesis.speak(utterance);
-    } else {
-      autoReadTimeoutRef.current = setTimeout(() => {
-        playVocabularyAt(index + 1, vocabList);
-      }, 1500);
-    }
+    );
   };
 
   const handleToggleReadAll = () => {
@@ -936,6 +1019,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       stopAutoReading();
     } else {
       setIsReadingAll(true);
+      if (onlineTtsAudioRef.current) {
+        try { onlineTtsAudioRef.current.pause(); } catch (err) {}
+        onlineTtsAudioRef.current.src = "";
+        onlineTtsAudioRef.current = null;
+      }
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
       }
@@ -1136,6 +1224,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     return () => {
       if (autoReadTimeoutRef.current) {
         clearTimeout(autoReadTimeoutRef.current);
+      }
+      if (onlineTtsAudioRef.current) {
+        try { onlineTtsAudioRef.current.pause(); } catch (err) {}
+        onlineTtsAudioRef.current.src = "";
+        onlineTtsAudioRef.current = null;
       }
       if (typeof window !== "undefined" && "speechSynthesis" in window) {
         window.speechSynthesis.cancel();
@@ -1384,6 +1477,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   // Audio simulation timer or Real audio position listener
   useEffect(() => {
     if (isPlaying) {
+      if (useRealTts) {
+        return;
+      }
       const intervalMs = 50; // update speed
 
       if (selectedArticle?.audioUrl && audioPlayerRef.current) {
@@ -1432,35 +1528,79 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     selectedArticle,
   ]);
 
-  // Browser speech synthesis option
-  const handleTtsSpeak = () => {
-    if (!selectedArticle) return;
-
-    // Stop any existing synthesis
-    window.speechSynthesis.cancel();
-
-    if (isPlaying) {
+  // Segment-by-segment Text-to-Speech playback loop
+  const playTtsSegment = (index: number) => {
+    if (!selectedArticle || index < 0 || index >= parsedSegments.length) {
       setIsPlaying(false);
+      setActiveSegmentIndex(-1);
       return;
     }
 
-    setIsPlaying(true);
-
-    const fullText = parsedSegments.map((s) => s.text).join(" ");
-
-    const utterance = new SpeechSynthesisUtterance(fullText);
-
-    const activeVoiceURI = getActiveVoiceURI();
-    if (activeVoiceURI && voices.length > 0) {
-      const foundVoice = voices.find((v) => v.voiceURI === activeVoiceURI);
-      if (foundVoice) {
-        utterance.voice = foundVoice;
+    setActiveSegmentIndex(index);
+    
+    // Scroll active element into view
+    if (listContainerRef.current) {
+      const activeEl = listContainerRef.current.querySelector(
+        `[data-seg-index="${index}"]`
+      );
+      if (activeEl) {
+        activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }
 
-    utterance.onend = () => setIsPlaying(false);
-    utterance.onerror = () => setIsPlaying(false);
-    window.speechSynthesis.speak(utterance);
+    const segment = parsedSegments[index];
+    playOnlineTts(
+      segment.text,
+      () => {
+        if (index + 1 < parsedSegments.length) {
+          autoReadTimeoutRef.current = setTimeout(() => {
+            playTtsSegment(index + 1);
+          }, 400); // Natural pause between sentences
+        } else {
+          setIsPlaying(false);
+          setActiveSegmentIndex(-1);
+        }
+      },
+      () => {
+        if (index + 1 < parsedSegments.length) {
+          playTtsSegment(index + 1);
+        } else {
+          setIsPlaying(false);
+          setActiveSegmentIndex(-1);
+        }
+      }
+    );
+  };
+
+  // Speaks using the Web/Online Speech synthesis or Google Translate API
+  const handleTtsSpeak = () => {
+    if (!selectedArticle) return;
+
+    if (isPlaying) {
+      // Pause playback
+      setIsPlaying(false);
+      if (onlineTtsAudioRef.current) {
+        try { onlineTtsAudioRef.current.pause(); } catch (err) {}
+      }
+      if (autoReadTimeoutRef.current) {
+        clearTimeout(autoReadTimeoutRef.current);
+        autoReadTimeoutRef.current = null;
+      }
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+      return;
+    }
+
+    // Play playback
+    setIsPlaying(true);
+    
+    // Resume from the active subtitle segment position, or wrap back to 0 if at the end
+    const startIndex = (activeSegmentIndex >= 0 && activeSegmentIndex < parsedSegments.length) 
+      ? activeSegmentIndex 
+      : 0;
+
+    playTtsSegment(startIndex);
   };
 
   const handleSaveToPlainText = () => {
@@ -1943,6 +2083,75 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 <span>Save Plain Text</span>
                               </button>
                             </div>
+
+                            {/* Group 3: Real playback vs TTS audio */}
+                            <div className="border-t border-slate-150 pt-2" />
+                            <div>
+                              <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+                                Audio Mode
+                              </span>
+                              <div className="flex flex-col space-y-1.5">
+                                <label className="flex items-center space-x-2 bg-slate-50 border border-slate-200/85 p-2 rounded-lg cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={useRealTts}
+                                    onChange={(e) => {
+                                      setUseRealTts(e.target.checked);
+                                      setIsPlaying(false);
+                                      if (onlineTtsAudioRef.current) {
+                                        try { onlineTtsAudioRef.current.pause(); } catch (err) {}
+                                        onlineTtsAudioRef.current.src = "";
+                                        onlineTtsAudioRef.current = null;
+                                      }
+                                      if (audioPlayerRef.current) {
+                                        audioPlayerRef.current.pause();
+                                      }
+                                      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+                                        window.speechSynthesis.cancel();
+                                      }
+                                    }}
+                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                                  />
+                                  <span className="text-[9px] font-bold text-slate-700 uppercase tracking-tight">Use Internet Text-To-Speech</span>
+                                </label>
+
+                                {useRealTts && (
+                                  <div className="space-y-1">
+                                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wide">
+                                      Speech Voice Accent
+                                    </span>
+                                    <select
+                                      value={getActiveVoiceURI()}
+                                      onChange={(e) => {
+                                        const val = e.target.value;
+                                        if (selectedArticle) {
+                                          localStorage.setItem("article_voice_" + selectedArticle.id, val);
+                                        }
+                                        setSelectedVoiceURI(val);
+                                      }}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2 py-1 text-[9.5px] font-semibold text-slate-800 outline-none cursor-pointer"
+                                    >
+                                      <option value="online-en">Online English Voice (US)</option>
+                                      <option value="online-en-gb">Online English Voice (UK)</option>
+                                      <option value="online-es">Online Spanish Voice (ES)</option>
+                                      <option value="online-fr">Online French Voice (FR)</option>
+                                      <option value="online-ja">Online Japanese Voice (JP)</option>
+                                      <option value="online-zh">Online Chinese Voice (CN)</option>
+                                      <option value="online-vi">Online Vietnamese Voice (VN)</option>
+                                      {voices.length > 0 && (
+                                        <optgroup label="System Voices">
+                                          {voices.map((voice) => (
+                                            <option key={voice.voiceURI} value={voice.voiceURI}>
+                                              {voice.name} ({voice.lang})
+                                            </option>
+                                          ))}
+                                        </optgroup>
+                                      )}
+                                    </select>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </>
                       )}
@@ -2041,14 +2250,21 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 }}
                                 className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2 py-1.5 text-[10.5px] font-semibold text-slate-800 outline-none transition-all cursor-pointer"
                               >
-                                {voices.length === 0 ? (
-                                  <option value="">No voices available</option>
-                                ) : (
-                                  voices.map((voice) => (
-                                    <option key={voice.voiceURI} value={voice.voiceURI}>
-                                      {voice.name} ({voice.lang})
-                                    </option>
-                                  ))
+                                <option value="online-en">Online English Voice (US)</option>
+                                <option value="online-en-gb">Online English Voice (UK)</option>
+                                <option value="online-es">Online Spanish Voice (ES)</option>
+                                <option value="online-fr">Online French Voice (FR)</option>
+                                <option value="online-ja">Online Japanese Voice (JP)</option>
+                                <option value="online-zh">Online Chinese Voice (CN)</option>
+                                <option value="online-vi">Online Vietnamese Voice (VN)</option>
+                                {voices.length > 0 && (
+                                  <optgroup label="System Voices">
+                                    {voices.map((voice) => (
+                                      <option key={voice.voiceURI} value={voice.voiceURI}>
+                                        {voice.name} ({voice.lang})
+                                      </option>
+                                    ))}
+                                  </optgroup>
                                 )}
                               </select>
                             </div>
