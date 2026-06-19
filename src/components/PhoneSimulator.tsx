@@ -597,6 +597,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     return "en-US";
   });
   const [isTtsStartingUp, setIsTtsStartingUp] = useState<boolean>(false);
+  const [sortTopicsBy, setSortTopicsBy] = useState<"name" | "createdAt">("name");
   const onlineTtsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const [editTitle, setEditTitle] = useState("");
@@ -1776,6 +1777,42 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     }
   }, [currentScreen]);
 
+  const goBackRef = useRef(goBack);
+  useEffect(() => {
+    goBackRef.current = goBack;
+  }, [goBack]);
+
+  useEffect(() => {
+    let backListenerPromise: Promise<any> | null = null;
+    const initBackButton = async () => {
+      if (
+        typeof window !== "undefined" &&
+        window.Capacitor &&
+        window.Capacitor.isNativePlatform &&
+        window.Capacitor.isNativePlatform()
+      ) {
+        try {
+          const { App } = await import("@capacitor/app");
+          backListenerPromise = App.addListener("backButton", () => {
+            goBackRef.current();
+          });
+        } catch (e) {
+          console.warn("Could not register Capacitor backButton:", e);
+        }
+      }
+    };
+    initBackButton();
+    return () => {
+      if (backListenerPromise) {
+        backListenerPromise.then((listener: any) => {
+          if (listener && listener.remove) {
+            listener.remove();
+          }
+        }).catch(() => {});
+      }
+    };
+  }, []);
+
   // Autoread and quiz cleanup on screen or article selection change
   useEffect(() => {
     if (currentScreen !== "vocabulary") {
@@ -2226,7 +2263,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     setIsInsertExpressionExpanded(false);
   };
 
-  const goBack = () => {
+  function goBack() {
     setIsMenuOpen(false);
     setIsTopicsMenuOpen(false);
     if (audioPlayerRef.current) {
@@ -2381,8 +2418,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               className="fixed inset-0 z-40"
                               onClick={() => setIsTopicsMenuOpen(false)}
                             />
-                            <div className="absolute left-0 top-full mt-1.5 w-52 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
-                              <div className="px-3 py-1 text-[9px] font-bold text-slate-400 uppercase tracking-wider block">
+                            <div className="absolute left-0 top-full mt-1.5 w-56 bg-white border border-slate-200 rounded-xl shadow-xl z-50 py-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                              <div className="px-4 py-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                                 Actions
                               </div>
                               <button
@@ -2391,46 +2428,78 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                   setTopicManageMode("list");
                                   setCurrentScreen("topic-management");
                                 }}
-                                className="w-full text-left px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2 cursor-pointer"
+                                className="w-full text-left px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2.5 cursor-pointer"
                               >
-                                <Edit className="w-3.5 h-3.5" />
+                                <Edit className="w-4 h-4 text-slate-500" />
                                 <span>Topic Management</span>
                               </button>
 
-                              <div className="border-t border-slate-100 my-1.5" />
+                              <div className="px-4 py-1.5 pb-2 flex flex-col space-y-1.5">
+                                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block text-left">
+                                  Sort Topics By
+                                </span>
+                                <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-150 font-sans">
+                                  <button
+                                    id="sort-topics-by-name"
+                                    type="button"
+                                    onClick={() => setSortTopicsBy('name')}
+                                    className={`flex-1 text-[12px] py-1 text-center font-bold rounded transition-all cursor-pointer ${
+                                      sortTopicsBy === 'name'
+                                        ? 'bg-white text-indigo-650 shadow-xs'
+                                        : 'text-slate-500 hover:text-slate-800'
+                                    }`}
+                                  >
+                                    Name
+                                  </button>
+                                  <button
+                                    id="sort-topics-by-date"
+                                    type="button"
+                                    onClick={() => setSortTopicsBy('createdAt')}
+                                    className={`flex-1 text-[12px] py-1 text-center font-bold rounded transition-all cursor-pointer ${
+                                      sortTopicsBy === 'createdAt'
+                                        ? 'bg-white text-indigo-650 shadow-xs'
+                                        : 'text-slate-500 hover:text-slate-800'
+                                    }`}
+                                  >
+                                    Date
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="border-t border-slate-100 my-2" />
 
                               <button
                                 onClick={() => {
                                   setIsTopicsMenuOpen(false);
                                   setCurrentScreen("settings");
                                 }}
-                                className="w-full text-left px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2 cursor-pointer"
+                                className="w-full text-left px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2.5 cursor-pointer"
                               >
-                                <Settings className="w-3.5 h-3.5 text-indigo-500" />
+                                <Settings className="w-4 h-4 text-indigo-500" />
                                 <span>Settings</span>
                               </button>
-
-                              <div className="border-t border-slate-100 my-1.5" />
 
                               <button
                                 onClick={() => {
                                   setIsTopicsMenuOpen(false);
                                   setShowIntroDialog(true);
                                 }}
-                                className="w-full text-left px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2 cursor-pointer"
+                                className="w-full text-left px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2.5 cursor-pointer"
                               >
-                                <HelpCircle className="w-3.5 h-3.5 text-indigo-500" />
+                                <HelpCircle className="w-4 h-4 text-indigo-500" />
                                 <span>Introduction</span>
                               </button>
+
+                              <div className="border-t border-slate-100 my-2" />
 
                               <button
                                 onClick={() => {
                                   setIsTopicsMenuOpen(false);
                                   setShowExitDialog(true);
                                 }}
-                                className="w-full text-left px-4 py-1.5 text-xs font-bold text-red-650 hover:bg-red-50 hover:text-red-750 transition-colors flex items-center space-x-2 cursor-pointer"
+                                className="w-full text-left px-4 py-2 text-[12px] font-bold text-red-650 hover:bg-red-50 hover:text-red-750 transition-colors flex items-center space-x-2.5 cursor-pointer"
                               >
-                                <X className="w-3.5 h-3.5 text-red-500" />
+                                <X className="w-4 h-4 text-red-500" />
                                 <span>Exit</span>
                               </button>
                             </div>
@@ -2448,10 +2517,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       </button>
                     )}
                     <span
-                      className={`font-bold text-[14px] leading-[20px] align-middle ${
-                        currentScreen === "article-detail"
-                          ? "text-[#204A87] py-0.5 max-w-[215px] truncate block"
-                          : "text-[#1b1b1b] tracking-tight truncate max-w-[170px] inline-block"
+                      className={`font-topbar font-normal text-[15px] leading-[22px] align-middle ${
+                        currentScreen === "articles"
+                          ? "text-[#5C3566] tracking-tight truncate max-w-[170px] inline-block"
+                          : currentScreen === "article-detail"
+                            ? "text-[#EF2990] py-0.5 max-w-[215px] truncate block"
+                            : "text-[#1b1b1b] tracking-tight truncate max-w-[170px] inline-block"
                       }`}
                       title={selectedArticle?.title}
                     >
@@ -2837,7 +2908,15 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       </div>
 
                       <div className="space-y-2">
-                        {topics.map((topic) => (
+                        {[...topics].sort((a, b) => {
+                          if (sortTopicsBy === 'name') {
+                            return (a.title || "").localeCompare(b.title || "");
+                          } else {
+                            const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+                            const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+                            return dateA - dateB; // creation time ascending as specified: "sort Topic cards by name or creation time. By default, ascending order by name"
+                          }
+                        }).map((topic) => (
                           <div
                             key={topic.id}
                             id={`topic-item-${topic.id}`}
@@ -2878,9 +2957,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               setTopicManageMode("add");
                               setTopicError(null);
                             }}
-                            className="flex items-center space-x-1 text-[10px] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-1 px-2.5 rounded-lg shadow-xs uppercase tracking-wider cursor-pointer transition-colors"
+                            className="flex items-center space-x-1 text-[11px] bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-3.5 rounded-lg shadow-xs uppercase tracking-wider cursor-pointer transition-colors"
                           >
-                            <Plus className="w-3 h-3" />
+                            <Plus className="w-3.5 h-3.5" />
                             <span>Add Topic</span>
                           </button>
                         ) : (
@@ -2910,7 +2989,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       )}
 
                       {topicManageMode === "list" && (
-                        <div className="space-y-2.5 overflow-y-auto flex-1 pr-0.5">
+                        <div className="space-y-2.5 overflow-y-auto flex-1 pr-0.5 mt-4">
                           {topics.length === 0 ? (
                             <p className="text-center text-xs text-slate-400 py-12">
                               No topics found. Add one to start.
@@ -3864,15 +3943,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             >
                               <div
                                 onClick={() => setIsInsertExpressionExpanded(!isInsertExpressionExpanded)}
-                                className="flex items-center justify-between border-b border-slate-100 pb-1 mb-1 font-sans cursor-pointer select-none group"
+                                className="flex items-center justify-start border-b border-slate-100 pb-1 mb-1 font-sans cursor-pointer select-none group"
                                 title="Click to Collapse/Expand Insert Expression form"
                               >
                                 <span className="text-[10px] font-extrabold text-indigo-700 tracking-wider uppercase flex items-center space-x-1 group-hover:text-indigo-500 transition-colors">
                                   <Plus className={`w-3.5 h-3.5 transform transition-transform duration-200 ${isInsertExpressionExpanded ? 'rotate-45 text-red-500' : 'text-indigo-600'}`} />
                                   <span>Insert Expression</span>
-                                </span>
-                                <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider group-hover:text-indigo-500 transition-colors">
-                                  {isInsertExpressionExpanded ? "[ Collapse ]" : "[ Expand ]"}
                                 </span>
                               </div>
 
@@ -4096,47 +4172,47 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                   {vocab.word}
                                                 </p>
                                                 {/* Translation Meaning */}
-                                                <p className="text-[11px] font-medium text-slate-500 italic mt-0.5 select-all leading-snug">
+                                                <p className="text-[12px] pl-3 font-medium text-slate-500 italic mt-0.5 select-all leading-snug">
                                                   {vocab.definition}
                                                 </p>
                                               </div>
-
-                                              {/* Action buttons (Edit & Delete) */}
-                                              <div className="vocab-item-actions flex items-center space-x-1.5 shrink-0 z-10">
-                                                <button
-                                                  type="button"
-                                                  onClick={() =>
-                                                    handleStartEditVocab(vocab)
-                                                  }
-                                                  className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-indigo-650 transition-colors cursor-pointer"
-                                                  title="Edit vocab"
-                                                >
-                                                  <Edit className="w-3.5 h-3.5" />
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() =>
-                                                    handleDeleteVocab(vocab.id)
-                                                  }
-                                                  className="p-1 hover:bg-red-50 rounded text-slate-400 hover:text-red-650 transition-colors cursor-pointer"
-                                                  title="Delete vocab"
-                                                >
-                                                  <Trash2 className="w-3.5 h-3.5" />
-                                                </button>
+ 
+                                                {/* Action buttons (Edit & Delete) */}
+                                                <div className="vocab-item-actions flex items-center space-x-1.5 shrink-0 z-10">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      handleStartEditVocab(vocab)
+                                                    }
+                                                    className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-indigo-650 transition-colors cursor-pointer"
+                                                    title="Edit vocab"
+                                                  >
+                                                    <Edit className="w-3.5 h-3.5" />
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() =>
+                                                      handleDeleteVocab(vocab.id)
+                                                    }
+                                                    className="p-1 hover:bg-red-50 rounded text-slate-400 hover:text-red-650 transition-colors cursor-pointer"
+                                                    title="Delete vocab"
+                                                  >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                  </button>
+                                                </div>
                                               </div>
-                                            </div>
-
-                                            {/* Example section (Clicking this is ignored for TTS as requested) */}
-                                            {vocab.exampleSentence && (
-                                              <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-left select-all">
-                                                <p className="text-[10px] text-slate-400 leading-normal font-medium bg-slate-50/55 p-1 px-1.5 rounded-md">
-                                                  <span className="font-semibold text-slate-500 uppercase tracking-wider text-[8px] mr-1 font-sans">
-                                                    Ex:
-                                                  </span>
-                                                  "{vocab.exampleSentence}"
-                                                </p>
-                                              </div>
-                                            )}
+ 
+                                              {/* Example section (Clicking this is ignored for TTS as requested) */}
+                                              {vocab.exampleSentence && (
+                                                <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-left select-all">
+                                                  <p className="text-[12px] text-slate-400 leading-normal font-medium bg-slate-50/55 p-1 px-1.5 rounded-md">
+                                                    <span className="font-semibold text-slate-500 uppercase tracking-wider text-[8px] mr-1 font-sans">
+                                                      Ex:
+                                                    </span>
+                                                    "{vocab.exampleSentence}"
+                                                  </p>
+                                                </div>
+                                              )}
                                           </div>
                                         )}
                                       </div>
@@ -4571,7 +4647,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             VDB Backup Data Sharing
                           </span>
                         </div>
-                        <p className="text-[10px] text-slate-500 leading-normal">
+                        <p className="text-[11px] text-slate-500 leading-normal">
                           Safely export all your learning topics, articles, and vocabulary database to a <code>.vdb</code> file, or restore from a previously exported backup.
                         </p>
                         <div className="grid grid-cols-2 gap-2 pt-1">
@@ -4604,7 +4680,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             Google Drive Sync
                           </span>
                         </div>
-                        <p className="text-[10px] text-slate-500 leading-normal">
+                        <p className="text-[11px] text-slate-500 leading-normal">
                           Sync your data securely to the cloud. Link your Google account to enable auto-backup or manually trigger uploads and downloads.
                         </p>
                         <div className="space-y-2 pt-1">
@@ -4780,17 +4856,22 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
                               setShowExitDialog(false);
-                              if (typeof window !== "undefined") {
+                              if (
+                                typeof window !== "undefined" &&
+                                window.Capacitor &&
+                                window.Capacitor.isNativePlatform &&
+                                window.Capacitor.isNativePlatform()
+                              ) {
                                 try {
-                                  // Attempt browser tab or window closure
-                                  window.close();
-                                } catch (e) {}
-                                try {
-                                  // Fallback closure indicator or redirect
-                                  window.location.href = "about:blank";
-                                } catch (e) {}
+                                  const { App } = await import("@capacitor/app");
+                                  await App.exitApp();
+                                } catch (err) {
+                                  console.warn("Failed to natively exit app:", err);
+                                }
+                              } else {
+                                console.log("Standard browser / simulator exit: return to previous screen by closing exit confirmation dialog.");
                               }
                             }}
                             className="px-4 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all cursor-pointer shadow-sm shadow-red-150"
