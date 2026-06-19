@@ -3,7 +3,7 @@
 
 @theme {
   --font-sans: "Roboto Condensed", ui-sans-serif, system-ui, sans-serif;
-  --font-topbar: "Fira Sans Condensed", sans-serif;
+  --font-topbar: "Fira Sans Considered", "Fira Sans Condensed", sans-serif;
   --font-article: "Signika", "Inter", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }

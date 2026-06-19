@@ -2401,7 +2401,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       />
                 {/* Header Layout (TopAppBar) */}
                 <div className="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 shadow-xs relative z-40">
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-2 min-w-0 flex-1 mr-2">
                     {currentScreen === "topics" && (
                       <div className="relative">
                         <button
@@ -2435,7 +2435,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               </button>
 
                               <div className="px-4 py-1.5 pb-2 flex flex-col space-y-1.5">
-                                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest block text-left">
+                                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest block text-left">
                                   Sort Topics By
                                 </span>
                                 <div className="flex bg-slate-100 rounded-lg p-0.5 border border-slate-150 font-sans">
@@ -2517,14 +2517,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       </button>
                     )}
                     <span
-                      className={`font-topbar font-normal text-[15px] leading-[22px] align-middle ${
-                        currentScreen === "articles"
-                          ? "text-[#5C3566] tracking-tight truncate max-w-[170px] inline-block"
-                          : currentScreen === "article-detail"
-                            ? "text-[#EF2990] py-0.5 max-w-[215px] truncate block"
-                            : "text-[#1b1b1b] tracking-tight truncate max-w-[170px] inline-block"
-                      }`}
-                      title={selectedArticle?.title}
+                      className="font-topbar font-semibold text-[16px] leading-[22px] align-middle text-[#1B1B1B] truncate flex-1 min-w-0 block"
+                      title={currentScreen === "article-detail" ? selectedArticle?.title : currentScreen === "articles" ? selectedTopic?.title : undefined}
                     >
                       {currentScreen === "topics" && "My Topics"}
                       {currentScreen === "topic-management" &&
@@ -2538,9 +2532,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       {currentScreen === "edit-article" &&
                         (isEditingNew ? "Create New Article" : "Edit Article")}
                       {currentScreen === "vocabulary" && (
-                        <span className="inline-flex items-center gap-1.5" style={{ color: "#049263" }}>
-                          <span style={{ color: "#049263" }}>Vocabulary</span>
-                          <BookOpen className="w-4 h-4 shrink-0" style={{ color: "#049263" }} />
+                        <span className="inline-flex items-center gap-1.5 text-[#1B1B1B] max-w-full">
+                          <span className="text-[#1B1B1B] truncate">Vocabulary</span>
+                          <BookOpen className="w-4 h-4 shrink-0 text-[#1B1B1B]" />
                         </span>
                       )}
                     </span>
@@ -3261,7 +3255,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                     className="w-9 h-9 rounded-lg object-cover shrink-0"
                                   />
                                   <div className="min-w-0 flex-1">
-                                    <h5 className="text-sm font-bold text-indigo-700 truncate">
+                                    <h5 className="text-sm font-bold text-[#204A87] truncate">
                                       {article.title}
                                     </h5>
                                     <div className="flex items-center space-x-1.5 mt-0.5">
@@ -3337,7 +3331,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                   className="w-12 h-12 rounded-lg object-cover border border-slate-200/80 shadow-2xs shrink-0"
                                 />
                                 <div className="flex-1 min-w-0">
-                                  <h5 className="text-sm font-bold text-indigo-700 line-clamp-2 leading-tight mb-1">
+                                  <h5 className="text-sm font-bold text-[#204A87] line-clamp-2 leading-tight mb-1">
                                     {article.title}
                                   </h5>
                                   <div className="flex items-center space-x-2">
@@ -4086,6 +4080,16 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                       editingVocabId === vocab.id;
                                     const isCurrentItemReading =
                                       isReadingAll && autoReadIndex === mapIdx;
+                                    const transSizeMap: Record<string, string> = {
+                                      "text-[11px]": "text-[11px]",
+                                      "text-[13px]": "text-[12px]",
+                                      "text-[15px]": "text-[13px]",
+                                      "text-[18px]": "text-[14px]",
+                                      "text-[22px]": "text-[15px]",
+                                      "text-[26px]": "text-[16px]",
+                                      "text-[32px]": "text-[17px]",
+                                    };
+                                    const transSizeClass = transSizeMap[vocabFontSize] || "text-[12px]";
                                     return (
                                       <div
                                         key={vocab.id}
@@ -4158,25 +4162,25 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                         ) : (
                                           /* Normal Card Read Mode UI */
                                           <div className="space-y-1">
-                                            <div className="flex items-start justify-between gap-1">
-                                              <div
-                                                onClick={() =>
-                                                  speakSingleWord(vocab.word)
-                                                }
-                                                className="min-w-0 flex-1 cursor-pointer hover:opacity-80 transition-all text-left"
-                                              >
-                                                {/* Foreign Word using Signika font, dynamic size controlled via zoom, allowed to flow over multiple lines */}
-                                                <p
-                                                  className={`${vocabFontSize} font-semibold text-slate-950 font-article break-words leading-tight select-all`}
+                                              <div className="flex items-start justify-between gap-1">
+                                                <div
+                                                  onClick={() =>
+                                                    speakSingleWord(vocab.word)
+                                                  }
+                                                  className="min-w-0 flex-1 cursor-pointer hover:opacity-80 transition-all text-left"
                                                 >
-                                                  {vocab.word}
-                                                </p>
-                                                {/* Translation Meaning */}
-                                                <p className="text-[12px] pl-3 font-medium text-slate-500 italic mt-0.5 select-all leading-snug">
-                                                  {vocab.definition}
-                                                </p>
-                                              </div>
- 
+                                                  {/* Foreign Word using Signika font, dynamic size controlled via zoom, allowed to flow over multiple lines */}
+                                                  <p
+                                                    className={`${vocabFontSize} font-semibold text-slate-950 font-article break-words leading-tight select-all`}
+                                                  >
+                                                    {vocab.word}
+                                                  </p>
+                                                  {/* Translation Meaning */}
+                                                  <p className={`${transSizeClass} pl-3 font-medium text-slate-500 italic mt-0.5 select-all leading-snug`}>
+                                                    {vocab.definition}
+                                                  </p>
+                                                </div>
+   
                                                 {/* Action buttons (Edit & Delete) */}
                                                 <div className="vocab-item-actions flex items-center space-x-1.5 shrink-0 z-10">
                                                   <button
@@ -4201,11 +4205,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                   </button>
                                                 </div>
                                               </div>
- 
+   
                                               {/* Example section (Clicking this is ignored for TTS as requested) */}
                                               {vocab.exampleSentence && (
                                                 <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-left select-all">
-                                                  <p className="text-[12px] text-slate-400 leading-normal font-medium bg-slate-50/55 p-1 px-1.5 rounded-md">
+                                                  <p className={`${transSizeClass} text-slate-400 leading-normal font-medium bg-slate-50/55 p-1 px-1.5 rounded-md`}>
                                                     <span className="font-semibold text-slate-500 uppercase tracking-wider text-[8px] mr-1 font-sans">
                                                       Ex:
                                                     </span>
@@ -4213,7 +4217,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                   </p>
                                                 </div>
                                               )}
-                                          </div>
+                                            </div>
                                         )}
                                       </div>
                                     );
