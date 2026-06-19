@@ -45,6 +45,15 @@ import {
   Settings,
   Crop,
 } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
+import { TextToSpeech } from "@capacitor-community/text-to-speech";
+
+declare global {
+  interface Window {
+    Capacitor?: any;
+  }
+}
+
 import { Topic, Article, SubtitleSegment, VocabularyItem, AccessLog } from "../types";
 import splashImage from "../assets/images/rabbit_carrot_splash_1781691897305.jpg";
 
@@ -580,6 +589,14 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     }
     return "google-en-us";
   });
+  const [supportedLanguages, setSupportedLanguages] = useState<string[]>([]);
+  const [selectedTtsLang, setSelectedTtsLang] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("vocabulary_tts_lang") || "en-US";
+    }
+    return "en-US";
+  });
+  const [isTtsStartingUp, setIsTtsStartingUp] = useState<boolean>(false);
   const onlineTtsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const [editTitle, setEditTitle] = useState("");
@@ -884,11 +901,51 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     setSelectedLocalVoiceURI(val);
     localStorage.setItem("default_local_voice_uri", val);
     if (selectedArticle) {
-      localStorage.setItem("article_local_voice_" + selectedArticle.id, val);
+       localStorage.setItem("article_local_voice_" + selectedArticle.id, val);
     }
 
     // Automatically initialize/warm-up the speech-voice related to the selected language
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+    if (
+      typeof window !== "undefined" &&
+      window.Capacitor &&
+      window.Capacitor.isNativePlatform &&
+      window.Capacitor.isNativePlatform()
+    ) {
+      try {
+        TextToSpeech.stop().catch(() => {});
+        let lang = "en-US";
+        if (val.startsWith("google-")) {
+          const m = val.match(/^google-([a-z]{2}(-[a-z]{2})?)/);
+          if (m) lang = m[1];
+        } else {
+          lang = val;
+        }
+
+        // Convert en to en-US. Some systems prefer BCP 47
+        if (lang.length === 2) {
+          if (lang === "en") lang = "en-US";
+          else if (lang === "es") lang = "es-ES";
+          else if (lang === "fr") lang = "fr-FR";
+          else if (lang === "ja") lang = "ja-JP";
+          else if (lang === "ko") lang = "ko-KR";
+          else if (lang === "vi") lang = "vi-VN";
+          else if (lang === "zh") lang = "zh-CN";
+        }
+
+        TextToSpeech.speak({
+          text: " ",
+          lang: lang,
+          rate: 2.0,
+          volume: 0.0
+        }).then(() => {
+          console.log("[Native TTS Warmup] Finished warm up for lang:", lang);
+        }).catch((err) => {
+          console.warn("[Native TTS Warmup] speech error:", err);
+        });
+      } catch (err) {
+        console.warn("[Native TTS Warmup] exception:", err);
+      }
+    } else if (typeof window !== "undefined" && "speechSynthesis" in window) {
       try {
         window.speechSynthesis.cancel();
         // Warm-up synthesis with a silent space
@@ -965,8 +1022,198 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     });
   };
 
-  // Speaks using the local Google TTS service of web speech synthesis
-  const playLocalGoogleTts = (text: string, onEnd?: () => void, onError?: () => void) => {
+  const loadTtsLanguages = async () => {
+    let langs: string[] = [];
+    if (
+      typeof window !== "undefined" &&
+      window.Capacitor &&
+      window.Capacitor.isNativePlatform &&
+      window.Capacitor.isNativePlatform()
+    ) {
+      try {
+        const res = await TextToSpeech.getSupportedLanguages();
+        if (res && res.languages && res.languages.length > 0) {
+          langs = res.languages;
+        }
+      } catch (err) {
+        console.warn("Error fetching getSupportedLanguages:", err);
+      }
+    }
+
+    if (langs.length === 0 && typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        const voicesList = window.speechSynthesis.getVoices();
+        if (voicesList && voicesList.length > 0) {
+          langs = voicesList.map((v) => v.lang);
+        }
+      } catch (err) {
+        console.warn("Error mapping speechSynthesis voices:", err);
+      }
+    }
+
+    if (langs.length === 0) {
+      langs = [
+        "en-US",
+        "en-GB",
+        "es-ES",
+        "fr-FR",
+        "zh-CN",
+        "ja-JP",
+        "ko-KR",
+        "vi-VN"
+      ];
+    }
+
+    const cleaned: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of langs) {
+      if (!raw) continue;
+      let clean = raw.trim();
+      if (clean.includes("-")) {
+        const parts = clean.split("-");
+        clean = parts[0].toLowerCase() + "-" + parts[1].toUpperCase();
+      } else if (clean.includes("_")) {
+        const parts = clean.split("_");
+        clean = parts[0].toLowerCase() + "-" + parts[1].toUpperCase();
+      } else {
+        clean = clean.toLowerCase();
+      }
+
+      if (!seen.has(clean)) {
+        seen.add(clean);
+        cleaned.push(clean);
+      }
+    }
+
+    if (!seen.has("en-US")) {
+      cleaned.unshift("en-US");
+    }
+
+    cleaned.sort();
+    setSupportedLanguages(cleaned);
+  };
+
+  const handleTtsLanguageChange = async (lang: string) => {
+    setSelectedTtsLang(lang);
+    localStorage.setItem("vocabulary_tts_lang", lang);
+    if (selectedArticle) {
+      localStorage.setItem("article_vocab_lang_" + selectedArticle.id, lang);
+    }
+
+    setIsTtsStartingUp(true);
+
+    if (
+      typeof window !== "undefined" &&
+      window.Capacitor &&
+      window.Capacitor.isNativePlatform &&
+      window.Capacitor.isNativePlatform()
+    ) {
+      try {
+        await TextToSpeech.stop().catch(() => {});
+        await TextToSpeech.speak({
+          text: " ",
+          lang: lang,
+          rate: 2.0,
+          volume: 0.0
+        }).catch(() => {});
+      } catch (err) {
+        console.warn("Capacitor native tts warm up failed:", err);
+      }
+    } else if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(" ");
+        utter.lang = lang;
+        utter.volume = 0;
+        window.speechSynthesis.speak(utter);
+      } catch (err) {
+        console.warn("Web SpeechSynthesis warm up failed:", err);
+      }
+    }
+
+    setTimeout(() => {
+      setIsTtsStartingUp(false);
+    }, 1200);
+  };
+
+  const getLanguageFriendlyName = (lang: string) => {
+    const mapping: { [key: string]: string } = {
+      "en-us": "English (United States)",
+      "en-gb": "English (United Kingdom)",
+      "es-es": "Spanish (Spain)",
+      "fr-fr": "French (France)",
+      "zh-cn": "Chinese (China)",
+      "ja-jp": "Japanese (Japan)",
+      "ko-kr": "Korean (South Korea)",
+      "vi-vn": "Vietnamese (Vietnam)",
+      "de-de": "German (Germany)",
+      "it-it": "Italian (Italy)",
+      "ru-ru": "Russian (Russia)",
+      "pt-br": "Portuguese (Brazil)",
+      "pt-pt": "Portuguese (Portugal)",
+    };
+    const key = lang.toLowerCase().replace("_", "-");
+    if (mapping[key]) return mapping[key];
+    
+    const parts = key.split("-");
+    if (parts[0]) {
+      const langNames: { [key: string]: string } = {
+        en: "English",
+        es: "Spanish",
+        fr: "French",
+        zh: "Chinese",
+        ja: "Japanese",
+        ko: "Korean",
+        vi: "Vietnamese",
+        de: "German",
+        it: "Italian",
+        ru: "Russian",
+        pt: "Portuguese",
+        ar: "Arabic",
+        hi: "Hindi",
+      };
+      const name = langNames[parts[0]];
+      if (name) {
+        return parts[1] ? `${name} (${parts[1].toUpperCase()})` : name;
+      }
+    }
+    return lang.toUpperCase();
+  };
+
+  const playVocabularyTts = (text: string, onEnd?: () => void, onError?: () => void) => {
+    const lang = selectedArticle
+      ? (localStorage.getItem("article_vocab_lang_" + selectedArticle.id) || selectedTtsLang)
+      : selectedTtsLang;
+
+    if (
+      typeof window !== "undefined" &&
+      window.Capacitor &&
+      window.Capacitor.isNativePlatform &&
+      window.Capacitor.isNativePlatform()
+    ) {
+      console.log("[Vocabulary Native TTS] Speaking:", text, "with language:", lang);
+      try {
+        TextToSpeech.stop().catch(() => {});
+      } catch (err) {}
+
+      TextToSpeech.speak({
+        text: text,
+        lang: lang,
+        rate: playbackSpeed || 1.0,
+        pitch: 1.0,
+        volume: 1.0
+      })
+        .then(() => {
+          if (onEnd) onEnd();
+        })
+        .catch((err) => {
+          console.warn("[Vocabulary Native TTS] Speak failed:", err);
+          if (onError) onError();
+          else if (onEnd) onEnd();
+        });
+      return;
+    }
+
     if (typeof window === "undefined" || !("speechSynthesis" in window)) {
       if (onEnd) onEnd();
       return;
@@ -975,7 +1222,138 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
-      const activeLocalURI = getActiveLocalVoiceURI();
+      utterance.lang = lang;
+
+      const allSysVoices = window.speechSynthesis.getVoices();
+      const tag = lang.replace("_", "-").toLowerCase();
+      const foundVoice = allSysVoices.find(
+        (v) => v.lang.toLowerCase() === tag ||
+               v.lang.toLowerCase().replace("_", "-") === tag ||
+               v.lang.toLowerCase().startsWith(tag.split("-")[0])
+      );
+      if (foundVoice) {
+        utterance.voice = foundVoice;
+      }
+
+      if (playbackSpeed) {
+        utterance.rate = playbackSpeed;
+      }
+
+      if (onEnd) utterance.onend = onEnd;
+      if (onError) utterance.onerror = onError;
+      window.speechSynthesis.speak(utterance);
+    } catch (err) {
+      console.warn("Web speechSynthesis play error:", err);
+      if (onEnd) onEnd();
+    }
+  };
+
+  const getActiveTtsLang = () => {
+    if (!selectedArticle) return "en-US";
+    const saved = localStorage.getItem("article_vocab_lang_" + selectedArticle.id);
+    if (saved) return saved;
+    return "en-US";
+  };
+
+  const cancelLocalSpeech = () => {
+    if (typeof window !== "undefined") {
+      if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+        try {
+          TextToSpeech.stop().catch(() => {});
+        } catch (err) {
+          console.warn("Capacitor stop error:", err);
+        }
+      }
+      if ("speechSynthesis" in window) {
+        try {
+          window.speechSynthesis.cancel();
+        } catch (err) {
+          console.warn("speechSynthesis cancel error:", err);
+        }
+      }
+    }
+  };
+
+  // Speaks using the local Google TTS service of web speech synthesis or native Capacitor TTS
+  const playLocalGoogleTts = (text: string, onEnd?: () => void, onError?: () => void) => {
+    const activeLocalURI = getActiveLocalVoiceURI();
+
+    if (
+      typeof window !== "undefined" &&
+      window.Capacitor &&
+      window.Capacitor.isNativePlatform &&
+      window.Capacitor.isNativePlatform()
+    ) {
+      console.log("[Native TTS] Speaking:", text, "with voice URI:", activeLocalURI);
+      try {
+        TextToSpeech.stop().catch(() => {});
+      } catch (err) {}
+
+      let lang = "en-US";
+      let voiceIdx: number | undefined = undefined;
+
+      // Extract lang from system voices list or rawURI
+      if (voices && voices.length > 0) {
+        const foundIndex = voices.findIndex((v) => v.voiceURI === activeLocalURI);
+        if (foundIndex !== -1) {
+          voiceIdx = foundIndex;
+          lang = voices[foundIndex].lang;
+        } else {
+          // Fallback parsing
+          if (activeLocalURI.startsWith("google-")) {
+            const m = activeLocalURI.match(/^google-([a-z]{2}(-[a-z]{2})?)/);
+            if (m) lang = m[1];
+          } else {
+            lang = activeLocalURI;
+          }
+        }
+      } else {
+        if (activeLocalURI.startsWith("google-")) {
+          const m = activeLocalURI.match(/^google-([a-z]{2}(-[a-z]{2})?)/);
+          if (m) lang = m[1];
+        } else {
+          lang = activeLocalURI;
+        }
+      }
+
+      // Convert en to en-US. Some systems prefer BCP 47
+      if (lang.length === 2) {
+        if (lang === "en") lang = "en-US";
+        else if (lang === "es") lang = "es-ES";
+        else if (lang === "fr") lang = "fr-FR";
+        else if (lang === "ja") lang = "ja-JP";
+        else if (lang === "ko") lang = "ko-KR";
+        else if (lang === "vi") lang = "vi-VN";
+        else if (lang === "zh") lang = "zh-CN";
+      }
+
+      TextToSpeech.speak({
+        text: text,
+        lang: lang,
+        voice: voiceIdx,
+        rate: playbackSpeed || 1.0,
+        pitch: 1.0,
+        volume: 1.0
+      })
+        .then(() => {
+          if (onEnd) onEnd();
+        })
+        .catch((err) => {
+          console.warn("[Native TTS] speak error:", err);
+          if (onError) onError();
+          else if (onEnd) onEnd();
+        });
+      return;
+    }
+
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+      if (onEnd) onEnd();
+      return;
+    }
+
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
 
       const allSysVoices = window.speechSynthesis.getVoices();
       let foundVoice = allSysVoices.find((v) => v.voiceURI === activeLocalURI);
@@ -994,12 +1372,17 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
         foundVoice = allSysVoices.find(
           (v) => v.lang.toLowerCase() === tag.toLowerCase() ||
+                 v.lang.toLowerCase().replace("_", "-") === tag.toLowerCase() ||
                  v.lang.toLowerCase().startsWith(tag.toLowerCase().split("-")[0])
         );
       }
 
       if (foundVoice) {
         utterance.voice = foundVoice;
+      }
+
+      if (playbackSpeed) {
+        utterance.rate = playbackSpeed;
       }
 
       if (onEnd) utterance.onend = onEnd;
@@ -1097,7 +1480,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   // Word reader for single vocabulary elements
   const speakSingleWord = (wordText: string) => {
-    playOnlineTts(wordText);
+    playVocabularyTts(wordText);
   };
 
   const autoReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -1116,9 +1499,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       } catch (err) {}
       onlineTtsAudioRef.current.src = "";
     }
-    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-    }
+    cancelLocalSpeech();
   };
 
   const playVocabularyAt = (index: number, vocabList: VocabularyItem[]) => {
@@ -1151,7 +1532,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       }, 1500);
     };
 
-    playOnlineTts(
+    playVocabularyTts(
       currentItem.word,
       triggerNext,
       triggerNext
@@ -1293,30 +1674,62 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     let attempts = 0;
     const maxAttempts = 30; // 15 seconds max
 
-    const updateVoices = () => {
-      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-        const allVoices = window.speechSynthesis.getVoices();
-        
-        // Android WebView and Google TTS often require polling or multiple calls
-        // until the voices array gets fully resolved and populated.
-        if (allVoices && allVoices.length > 0) {
-          setVoices(allVoices);
-          
-          // Set a default voice if and only if none is currently selected
-          setSelectedVoiceURI((prev) => {
-            if (prev) return prev;
-            // Prefer Google voices or English/Local languages to match standard TTS use
-            const googleVoice = allVoices.find((v) => v.name.toLowerCase().includes("google") && v.lang.startsWith("en"));
-            const enVoice = allVoices.find((v) => v.lang.startsWith("en"));
-            const fallbackVoice = googleVoice || enVoice || allVoices[0];
-            return fallbackVoice ? fallbackVoice.voiceURI : "";
-          });
+    const updateVoices = async () => {
+      let loadedVoices: SpeechSynthesisVoice[] = [];
 
-          // Since we found voices, we can clear the interval to save resources
-          if (allVoices.length > 5 && intervalId) {
-            clearInterval(intervalId);
-            intervalId = null;
+      // A. Fetch native voices if on Capacitor Native Phone/WebView
+      if (
+        typeof window !== "undefined" &&
+        window.Capacitor &&
+        window.Capacitor.isNativePlatform &&
+        window.Capacitor.isNativePlatform()
+      ) {
+        try {
+          const res = await TextToSpeech.getSupportedVoices();
+          if (res && res.voices && res.voices.length > 0) {
+            loadedVoices = res.voices;
+          } else {
+            const langRes = await TextToSpeech.getSupportedLanguages();
+            if (langRes && langRes.languages && langRes.languages.length > 0) {
+              loadedVoices = langRes.languages.map((lang, idx) => ({
+                voiceURI: lang,
+                name: `System TTS - ${lang}`,
+                lang: lang,
+                default: idx === 0,
+                localService: true
+              } as SpeechSynthesisVoice));
+            }
           }
+        } catch (err) {
+          console.warn("Failed retrieving native speech voices on init:", err);
+        }
+      }
+
+      // B. Fallback to standard web speech API
+      if (loadedVoices.length === 0 && typeof window !== "undefined" && "speechSynthesis" in window) {
+        const currentVoices = window.speechSynthesis.getVoices();
+        if (currentVoices && currentVoices.length > 0) {
+          loadedVoices = currentVoices;
+        }
+      }
+
+      if (loadedVoices && loadedVoices.length > 0) {
+        setVoices(loadedVoices);
+        
+        // Set a default voice if and only if none is currently selected
+        setSelectedVoiceURI((prev) => {
+          if (prev) return prev;
+          // Prefer Google voices or English/Local languages to match standard TTS use
+          const googleVoice = loadedVoices.find((v) => v.name.toLowerCase().includes("google") && v.lang.startsWith("en"));
+          const enVoice = loadedVoices.find((v) => v.lang.startsWith("en"));
+          const fallbackVoice = googleVoice || enVoice || loadedVoices[0];
+          return fallbackVoice ? fallbackVoice.voiceURI : "";
+        });
+
+        // Since we found voices, we can clear the interval to save resources
+        if (loadedVoices.length > 5 && intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
         }
       }
     };
@@ -1356,6 +1769,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (currentScreen === "vocabulary") {
+      loadTtsLanguages();
+    }
+  }, [currentScreen]);
 
   // Autoread and quiz cleanup on screen or article selection change
   useEffect(() => {
@@ -2334,166 +2753,24 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               </div>
                             </div>
 
-                            {/* Google TTS mode Group */}
-                            <div className="text-left pt-1.5 border-t border-slate-100 space-y-2">
+                            {/* Language voices Combo Box Group */}
+                            <div className="text-left pt-2 border-t border-slate-100 space-y-1.5">
                               <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1 font-sans">
-                                Google TTS Mode
+                                Language Voices
                               </span>
-                              <div className="space-y-1.5 bg-slate-50/50 p-2 rounded-lg border border-slate-100">
-                                <button
-                                  id="btn-init-tts-service"
-                                  type="button"
-                                  onClick={() => {
-                                    setIsInitializingLocalTts(true);
-                                    
-                                    // Wake up speechSynthesis instantly
-                                    if (typeof window !== "undefined" && "speechSynthesis" in window) {
-                                      try {
-                                        window.speechSynthesis.cancel();
-                                        const systemVoicesObj = window.speechSynthesis.getVoices();
-                                        if (systemVoicesObj && systemVoicesObj.length > 0) {
-                                          setVoices(systemVoicesObj);
-                                        }
-                                        
-                                        // Silent speak to initialize WebView/OS sound streams
-                                        const tinyWake = new SpeechSynthesisUtterance(" ");
-                                        tinyWake.volume = 0;
-                                        window.speechSynthesis.speak(tinyWake);
-                                      } catch (err) {
-                                        console.warn("Speech synthesis initial wakeup failed:", err);
-                                      }
-                                    }
-
-                                    setTimeout(() => {
-                                      setIsInitializingLocalTts(false);
-                                      setIsLocalTtsActive(true);
-                                      localStorage.setItem("local_tts_initialized", "true");
-                                      
-                                      // Final robust check for standard speech voices list
-                                      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-                                        const currentVoices = window.speechSynthesis.getVoices();
-                                        if (currentVoices && currentVoices.length > 0) {
-                                          setVoices(currentVoices);
-                                          
-                                          // Pick standard default local voice if unselected
-                                          const matchingGoogleEn = currentVoices.find((v) => 
-                                            v.name.toLowerCase().includes("google") && v.lang.startsWith("en")
-                                          );
-                                          const fallbackURI = matchingGoogleEn ? matchingGoogleEn.voiceURI : (currentVoices[0] ? currentVoices[0].voiceURI : "google-en-us");
-                                          
-                                          const activeVoice = getActiveLocalVoiceURI();
-                                          if (activeVoice === "google-en-us" && fallbackURI !== "google-en-us") {
-                                            handleLocalVoiceChange(fallbackURI);
-                                          }
-                                        }
-                                      }
-                                    }, 850);
-                                  }}
-                                  disabled={isInitializingLocalTts}
-                                  className="w-full flex items-center justify-center space-x-1 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 py-1 rounded px-2 text-[10px] font-bold uppercase transition-all cursor-pointer shadow-3xs"
+                              <div className="bg-slate-50/50 p-2 rounded-lg border border-slate-100">
+                                <select
+                                  id="combo-vocabulary-voices"
+                                  value={getActiveTtsLang()}
+                                  onChange={(e) => handleTtsLanguageChange(e.target.value)}
+                                  className="w-full bg-white border border-slate-250 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-1.5 py-1 text-[9px] font-semibold text-slate-800 outline-none cursor-pointer"
                                 >
-                                  {isInitializingLocalTts ? (
-                                    <span className="flex items-center space-x-1 animate-pulse text-[9.5px] text-amber-600 font-extrabold uppercase">
-                                      Connecting...
-                                    </span>
-                                  ) : isLocalTtsActive ? (
-                                    <span className="text-emerald-600 font-extrabold flex items-center">
-                                      ✓ Init TTS Service
-                                    </span>
-                                  ) : (
-                                    <span>Init TTS Service</span>
-                                  )}
-                                </button>
-
-                                <div className="space-y-0.5">
-                                  <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-widest text-left">
-                                    Language
-                                  </span>
-                                  <select
-                                    id="combo-local-tts-lang"
-                                    value={getActiveLocalVoiceURI()}
-                                    onChange={(e) => handleLocalVoiceChange(e.target.value)}
-                                    className="w-full bg-white border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-1.5 py-1 text-[9px] font-semibold text-slate-800 outline-none cursor-pointer"
-                                  >
-                                    {!isLocalTtsActive ? (
-                                      <option value="">Not Initialized</option>
-                                    ) : (
-                                      getAvailableLocalVoices().map((voice, idx) => (
-                                        <option key={voice.voiceURI || idx} value={voice.voiceURI}>
-                                          {voice.name || voice.lang || `Voice ${idx + 1}`}
-                                        </option>
-                                      ))
-                                    )}
-                                  </select>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Group 2: Audio Mode / TTS mode */}
-                            <div className="text-left pt-1.5 border-t border-slate-100 space-y-2">
-                              <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1 font-sans">
-                                TTS Mode
-                              </span>
-                              <div className="flex flex-col space-y-1.5">
-                                <label className="flex items-center space-x-2 bg-slate-50 border border-slate-150 p-2 rounded-lg cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={useRealTts}
-                                    onChange={(e) => {
-                                      setUseRealTts(e.target.checked);
-                                      setIsPlaying(false);
-                                      if (onlineTtsAudioRef.current) {
-                                        try { onlineTtsAudioRef.current.pause(); } catch (err) {}
-                                        onlineTtsAudioRef.current.src = "";
-                                      }
-                                      if (audioPlayerRef.current) {
-                                        audioPlayerRef.current.pause();
-                                      }
-                                      if (typeof window !== "undefined" && "speechSynthesis" in window) {
-                                        window.speechSynthesis.cancel();
-                                      }
-                                    }}
-                                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
-                                  />
-                                  <span className="text-[9px] font-bold text-slate-705 uppercase tracking-tight">Use Internet Text-To-Speech</span>
-                                </label>
-
-                                {useRealTts && (
-                                  <div className="space-y-1">
-                                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-wide text-left">
-                                      Speech Voice Accent
-                                    </span>
-                                    <select
-                                      value={getActiveVoiceURI()}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        if (selectedArticle) {
-                                          localStorage.setItem("article_voice_" + selectedArticle.id, val);
-                                        }
-                                        setSelectedVoiceURI(val);
-                                      }}
-                                      className="w-full bg-slate-50 border border-slate-205 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded-lg px-2 py-1 text-[9.5px] font-semibold text-slate-800 outline-none cursor-pointer font-sans"
-                                    >
-                                      <option value="online-en">Online English Voice (US)</option>
-                                      <option value="online-en-gb">Online English Voice (UK)</option>
-                                      <option value="online-es">Online Spanish Voice (ES)</option>
-                                      <option value="online-fr">Online French Voice (FR)</option>
-                                      <option value="online-ja">Online Japanese Voice (JP)</option>
-                                      <option value="online-zh">Online Chinese Voice (CN)</option>
-                                      <option value="online-vi">Online Vietnamese Voice (VN)</option>
-                                      <option value="online-ko">Online Korean Voice (KR)</option>
-                                      {voices.length > 0 && (
-                                        <optgroup label="System Voices">
-                                          {voices.map((voice) => (
-                                            <option key={voice.voiceURI} value={voice.voiceURI}>
-                                              {voice.name} ({voice.lang})
-                                            </option>
-                                          ))}
-                                        </optgroup>
-                                      )}
-                                    </select>
-                                  </div>
-                                )}
+                                  {supportedLanguages.map((langCode) => (
+                                    <option key={langCode} value={langCode}>
+                                      {getLanguageFriendlyName(langCode)}
+                                    </option>
+                                  ))}
+                                </select>
                               </div>
                             </div>
                           </div>
@@ -3205,12 +3482,27 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -15 }}
                       transition={{ duration: 0.18 }}
-                      className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden select-none"
+                      className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden relative select-none"
                       onTouchStart={handleTouchStart}
                       onTouchEnd={handleTouchEnd}
                       onMouseDown={handleMouseDown}
                       onMouseUp={handleMouseUp}
                     >
+                      {isTtsStartingUp && (
+                        <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px] flex items-center justify-center z-50 p-4">
+                          <div className="bg-white rounded-xl shadow-xl border border-slate-105 p-4 shrink-0 max-w-[200px] flex flex-col items-center justify-center text-center space-y-3 animate-in fade-in zoom-in-95 duration-150">
+                            <div className="relative w-9 h-9 flex items-center justify-center">
+                              <div className="absolute inset-0 border-2 border-indigo-100 border-t-indigo-600 rounded-full animate-spin" />
+                              <Volume2 className="w-4 h-4 text-indigo-600 animate-pulse" />
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-black uppercase text-slate-800 tracking-wider">Starting up...</p>
+                              <p className="text-[9px] text-slate-500 font-medium mt-0.5">Capacitor TTS Engine is initializing</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Scrollable list & Add form */}
                       <div className="flex-1 overflow-y-auto px-1.5 py-3 space-y-3.5 scrollbar-thin scrollbar-thumb-slate-200">
                         {isTesting ? (
