@@ -24,6 +24,7 @@ export interface Article {
   createdAt: string;
   marked?: boolean;
   vocabulary?: VocabularyItem[];
+  notes?: string;
 }
 
 export interface AccessLog {

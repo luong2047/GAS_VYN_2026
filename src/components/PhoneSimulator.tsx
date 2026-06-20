@@ -55,6 +55,7 @@ declare global {
 }
 
 import { Topic, Article, SubtitleSegment, VocabularyItem, AccessLog } from "../types";
+import { PointsToNote } from "./PointsToNote";
 import splashImage from "../assets/images/rabbit_carrot_splash_1781691897305.jpg";
 
 const ARTICLE_IMAGES = [
@@ -86,6 +87,7 @@ interface PhoneSimulatorProps {
     content: string,
     imageUrl?: string,
     audioUrl?: string,
+    notes?: string,
   ) => void;
   onAddArticle?: (
     topicId: number,
@@ -349,11 +351,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     | "article-detail"
     | "edit-article"
     | "vocabulary"
+    | "points-to-note"
     | "topic-management"
     | "search-articles"
     | "settings"
     | "exited"
   >("topics");
+  const [isNoteEditMode, setIsNoteEditMode] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [cameFromSearch, setCameFromSearch] = useState(false);
 
@@ -561,6 +565,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const [selectedArticle, setSelectedArticle] = useState<Article | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackMs, setPlaybackMs] = useState(0);
+  const [audioDurationMs, setAudioDurationMs] = useState<number>(0);
   const [playbackSpeed, setPlaybackSpeed] = useState(1); // 1x, 1.25x, 1.5x etc
   const [activeSegmentIndex, setActiveSegmentIndex] = useState(-1);
   const [parsedSegments, setParsedSegments] = useState<SubtitleSegment[]>([]);
@@ -569,7 +574,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [fontSizeClass, setFontSizeClass] = useState<
-    "text-xs" | "text-sm" | "text-base" | "text-lg" | "text-xl"
+    | "text-xs"
+    | "text-sm"
+    | "text-base"
+    | "text-lg"
+    | "text-xl"
+    | "text-2xl"
+    | "text-3xl"
   >("text-sm");
   const [editorFontSize, setEditorFontSize] = useState<number>(13);
   const startPickerRef = useRef<HTMLInputElement>(null);
@@ -745,15 +756,29 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     const diffX = touchStartXRef.current - e.changedTouches[0].clientX;
     const diffY = touchStartYRef.current - e.changedTouches[0].clientY;
 
-    // Swipe left: navigate to vocabulary list
+    if (isNoteEditMode && currentScreen === "points-to-note") {
+      touchStartXRef.current = null;
+      touchStartYRef.current = null;
+      return;
+    }
+
+    // Swipe left: navigate (Article -> Vocabulary -> Points to Note -> Article)
     if (diffX > 80 && Math.abs(diffX) > Math.abs(diffY)) {
       if (currentScreen === "article-detail") {
         setCurrentScreen("vocabulary");
+      } else if (currentScreen === "vocabulary") {
+        setCurrentScreen("points-to-note");
+      } else if (currentScreen === "points-to-note") {
+        setCurrentScreen("article-detail");
       }
     }
-    // Swipe right: navigate back to article detail from vocabulary list
+    // Swipe right: navigate back (Article -> Points to Note -> Vocabulary -> Article)
     if (diffX < -80 && Math.abs(diffX) > Math.abs(diffY)) {
-      if (currentScreen === "vocabulary") {
+      if (currentScreen === "article-detail") {
+        setCurrentScreen("points-to-note");
+      } else if (currentScreen === "points-to-note") {
+        setCurrentScreen("vocabulary");
+      } else if (currentScreen === "vocabulary") {
         setCurrentScreen("article-detail");
       }
     }
@@ -785,15 +810,29 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     const diffX = touchStartXRef.current - e.clientX;
     const diffY = touchStartYRef.current - e.clientY;
 
-    // Swipe left: nav to vocabulary
+    if (isNoteEditMode && currentScreen === "points-to-note") {
+      touchStartXRef.current = null;
+      touchStartYRef.current = null;
+      return;
+    }
+
+    // Swipe left: nav (Article -> Vocabulary -> Points to Note -> Article)
     if (diffX > 80 && Math.abs(diffX) > Math.abs(diffY)) {
       if (currentScreen === "article-detail") {
         setCurrentScreen("vocabulary");
+      } else if (currentScreen === "vocabulary") {
+        setCurrentScreen("points-to-note");
+      } else if (currentScreen === "points-to-note") {
+        setCurrentScreen("article-detail");
       }
     }
-    // Swipe right: nav back
+    // Swipe right: nav back (Article -> Points to Note -> Vocabulary -> Article)
     if (diffX < -80 && Math.abs(diffX) > Math.abs(diffY)) {
-      if (currentScreen === "vocabulary") {
+      if (currentScreen === "article-detail") {
+        setCurrentScreen("points-to-note");
+      } else if (currentScreen === "points-to-note") {
+        setCurrentScreen("vocabulary");
+      } else if (currentScreen === "vocabulary") {
         setCurrentScreen("article-detail");
       }
     }
@@ -1658,7 +1697,17 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     | "text-base"
     | "text-lg"
     | "text-xl"
-  )[] = ["text-xs", "text-sm", "text-base", "text-lg", "text-xl"];
+    | "text-2xl"
+    | "text-3xl"
+  )[] = [
+    "text-xs",
+    "text-sm",
+    "text-base",
+    "text-lg",
+    "text-xl",
+    "text-2xl",
+    "text-3xl",
+  ];
   const vocabFontSizes = [
     "text-[11px]",
     "text-[13px]",
@@ -1823,6 +1872,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       setIsTestSubmitted(false);
       setTestResults(null);
       setIsVocabMenuOpen(false);
+    }
+    if (currentScreen !== "points-to-note") {
+      setIsNoteEditMode(false);
     }
     return () => {
       if (autoReadTimeoutRef.current) {
@@ -2020,6 +2072,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       }
       setParsedSegments(parsed);
       setPlaybackMs(0);
+      setAudioDurationMs(0);
       setIsPlaying(false);
       setActiveSegmentIndex(-1);
 
@@ -2282,7 +2335,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       setSelectedTopic(null);
     } else if (currentScreen === "edit-article") {
       setCurrentScreen(isEditingNew ? ((cameFromSearch || !selectedTopic) ? "search-articles" : "articles") : "article-detail");
-    } else if (currentScreen === "vocabulary") {
+    } else if (currentScreen === "vocabulary" || currentScreen === "points-to-note") {
       setCurrentScreen("article-detail");
     } else if (currentScreen === "topic-management" || currentScreen === "settings") {
       setCurrentScreen("topics");
@@ -2389,6 +2442,18 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
           if (!isRepeatEnabled) {
             setIsPlaying(false);
             setPlaybackMs(0);
+          }
+        }}
+        onLoadedMetadata={(e) => {
+          const d = e.currentTarget.duration;
+          if (d && !isNaN(d)) {
+            setAudioDurationMs(d * 1000);
+          }
+        }}
+        onDurationChange={(e) => {
+          const d = e.currentTarget.duration;
+          if (d && !isNaN(d)) {
+            setAudioDurationMs(d * 1000);
           }
         }}
       />
@@ -2537,6 +2602,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           <BookOpen className="w-4 h-4 shrink-0 text-[#1B1B1B]" />
                         </span>
                       )}
+                      {currentScreen === "points-to-note" && (
+                        <span className="inline-flex items-center gap-1.5 text-[#1B1B1B] max-w-full">
+                          <span className="text-[#1B1B1B] truncate">Points to Note</span>
+                          <FileText className="w-4 h-4 shrink-0 text-[#1B1B1B]" />
+                        </span>
+                      )}
                     </span>
                   </div>
 
@@ -2578,6 +2649,21 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                     >
                       <Plus className="w-5 h-5 shrink-0" />
                     </button>
+                  )}
+
+                  {currentScreen === "points-to-note" && selectedArticle && (
+                    <div className="flex items-center">
+                      <button
+                        onClick={() => setIsNoteEditMode(!isNoteEditMode)}
+                        className={`px-2.5 py-1 text-[11px] font-sans font-bold uppercase tracking-wider rounded-lg border transition-all cursor-pointer ${
+                          isNoteEditMode
+                            ? "bg-indigo-600 border-indigo-600 text-white hover:bg-indigo-700"
+                            : "bg-white border-slate-200 text-slate-500 hover:bg-slate-100"
+                        }`}
+                      >
+                        {isNoteEditMode ? "Done" : "Edit"}
+                      </button>
+                    </div>
                   )}
 
                   {currentScreen === "article-detail" && selectedArticle && (
@@ -2631,16 +2717,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 <span>EDIT THIS ARTICLE</span>
                               </button>
 
-                              <button
-                                onClick={() => {
-                                  setCurrentScreen("vocabulary");
-                                  setIsMenuOpen(false);
-                                }}
-                                className="w-full flex items-center justify-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-3xs hover:scale-[1.02] active:scale-[0.98]"
-                              >
-                                <BookOpen className="w-3 h-3" />
-                                <span>Vocabulary</span>
-                              </button>
+                              {/* Separator element below Edit This Article */}
+                              <div className="border-t border-[#F3F3F3] my-1.5" />
 
                               <button
                                 id="toggle-translation-btn"
@@ -2648,7 +2726,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                   setShowTranslation(!showTranslation);
                                   setIsMenuOpen(false);
                                 }}
-                                style={{ color: "#fefeff", backgroundColor: "#b73f9b" }}
+                                style={{ color: "#fefeff", backgroundColor: "#973484" }}
                                 className={`w-full flex items-center justify-center space-x-1.5 py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer border ${
                                   showTranslation
                                     ? "border-pink-300 hover:opacity-90"
@@ -2662,10 +2740,32 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                     : "Show Translation"}
                                 </span>
                               </button>
+
+                              <button
+                                onClick={() => {
+                                  setCurrentScreen("vocabulary");
+                                  setIsMenuOpen(false);
+                                }}
+                                className="w-full flex items-center justify-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-3xs hover:scale-[1.02] active:scale-[0.98]"
+                              >
+                                <BookOpen className="w-3 h-3" />
+                                <span>Vocabulary</span>
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  setCurrentScreen("points-to-note");
+                                  setIsMenuOpen(false);
+                                }}
+                                className="w-full flex items-center justify-center space-x-1.5 bg-[#C4A000] hover:opacity-90 text-white py-1.5 px-3 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-3xs hover:scale-[1.02] active:scale-[0.98]"
+                              >
+                                <FileText className="w-3 h-3" />
+                                <span>Points to Note</span>
+                              </button>
                             </div>
 
                             {/* Divider */}
-                            <div className="border-t border-slate-150" />
+                            <div className="border-t border-[#F3F3F3]" />
 
                             {/* Group 1: Subtitle font zoom */}
                             <div>
@@ -2691,8 +2791,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                   <span>A-</span>
                                 </button>
 
-                                <span className="text-[10px] font-mono font-bold text-slate-650 px-1 shrink-0 capitalize text-center min-w-[55px]">
-                                  {fontSizeClass.replace("text-", "")}
+                                <span className="text-[10px] font-mono font-bold text-slate-650 px-1 shrink-0 uppercase text-center min-w-[55px]">
+                                  {fontSizeClass === "text-2xl"
+                                    ? "XXL"
+                                    : fontSizeClass === "text-3xl"
+                                      ? "XXX"
+                                      : fontSizeClass.replace("text-", "")}
                                 </span>
 
                                 <button
@@ -2705,7 +2809,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                       );
                                     }
                                   }}
-                                  disabled={fontSizeClass === "text-xl"}
+                                  disabled={fontSizeClass === "text-3xl"}
                                   className="p-1 px-2.5 bg-white hover:bg-slate-100 disabled:opacity-40 rounded border border-slate-150 text-slate-700 transition-colors flex items-center justify-center grow cursor-pointer font-bold text-[10px]"
                                   title="Zoom In font size"
                                 >
@@ -2714,9 +2818,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 </button>
                               </div>
                             </div>
-
-                            {/* Divider */}
-                            <div className="border-t border-slate-150" />
 
                             {/* Group 2: Save to plain text */}
                             <div>
@@ -3452,7 +3553,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                 ? "text-[15px]"
                                                 : fontSizeClass === "text-lg"
                                                   ? "text-base"
-                                                  : "text-[19px]"
+                                                  : fontSizeClass === "text-xl"
+                                                    ? "text-[19px]"
+                                                    : fontSizeClass === "text-2xl"
+                                                      ? "text-xl"
+                                                      : "text-2xl"
                                         } text-slate-500 font-medium italic select-all leading-normal`}
                                       >
                                         {seg.translation}
@@ -3467,29 +3572,33 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       </div>
 
                       {/* BOTTOM JETPACK COMPOSE MEDIA CONTROLLER SECTION */}
-                      <div className="border-t border-slate-200 bg-white px-4 py-3 pb-4 space-y-2 shadow-xs">
-                        {/* Timeline Slider */}
-                        <input
-                          type="range"
-                          min={0}
-                          max={
-                            parsedSegments.length > 0
-                              ? parsedSegments[parsedSegments.length - 1]
-                                  .endTimeMs + 1000
-                              : 30000
-                          }
-                          value={playbackMs}
-                          onChange={(e) => seekTo(Number(e.target.value))}
-                          className="w-full h-1 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-650 focus:outline-none"
-                        />
+                      {selectedArticle?.audioUrl && (
+                        <div className="border-t border-slate-200 bg-white px-4 py-3 pb-4 space-y-2 shadow-xs">
+                          {/* Timeline Slider */}
+                          <input
+                            type="range"
+                            min={0}
+                            max={
+                              parsedSegments.length > 0
+                                ? parsedSegments[parsedSegments.length - 1]
+                                    .endTimeMs + 1000
+                                : 30000
+                            }
+                            value={playbackMs}
+                            onChange={(e) => seekTo(Number(e.target.value))}
+                            className="w-full h-1 bg-slate-100 rounded-lg appearance-none cursor-pointer accent-indigo-650 focus:outline-none"
+                          />
 
-                        {/* Controls Row */}
-                        <div className="flex items-center justify-between gap-2 pt-1.5">
-                          {/* Left: Empty spacer to balance the centered group */}
-                          <div className="w-14 shrink-0" />
+                          {/* Controls Row */}
+                          <div className="flex items-center justify-center gap-3 pt-1.5 font-sans">
+                            {/* Tracker timestamp label */}
+                            <span
+                              style={{ color: "#BABDB6" }}
+                              className="text-[10px] md:text-[11px] font-mono font-bold select-none shrink-0"
+                            >
+                              {formatTime(playbackMs)}
+                            </span>
 
-                          {/* Center: Controls aligned by Play/Pause */}
-                          <div className="flex items-center justify-center gap-3 flex-1">
                             {/* Repeat Button */}
                             <button
                               onClick={() => setIsRepeatEnabled(!isRepeatEnabled)}
@@ -3536,15 +3645,45 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               <option value={1.25}>1.25s</option>
                               <option value={1.5}>1.5s</option>
                             </select>
-                          </div>
 
-                          {/* Right: Duration label aligned to the right edge */}
-                          <div className="w-14 text-[10px] md:text-[11px] font-mono font-bold text-slate-500 select-none shrink-0 text-right">
-                            {formatTime(playbackMs)}
+                            {/* Total duration label */}
+                            <span
+                              style={{ color: "#BABDB6" }}
+                              className="text-[10px] md:text-[11px] font-mono font-bold select-none shrink-0"
+                            >
+                              {formatTime(audioDurationMs > 0 ? audioDurationMs : (parsedSegments.length > 0 ? parsedSegments[parsedSegments.length - 1].endTimeMs : 0))}
+                            </span>
                           </div>
                         </div>
-                      </div>
+                      )}
                     </motion.div>
+                  )}
+
+                  {/* SCREEN: Points to Note (Linguist Notes) Screen */}
+                  {currentScreen === "points-to-note" && selectedArticle && (
+                    <PointsToNote
+                      article={selectedArticle}
+                      isEditMode={isNoteEditMode}
+                      setIsEditMode={setIsNoteEditMode}
+                      onSaveNotes={(html) => {
+                        setSelectedArticle(prev => prev ? { ...prev, notes: html } : null);
+                        if (onUpdateArticle) {
+                          onUpdateArticle(
+                            selectedArticle.id,
+                            selectedArticle.title,
+                            selectedArticle.type,
+                            selectedArticle.content,
+                            selectedArticle.imageUrl,
+                            selectedArticle.audioUrl,
+                            html
+                          );
+                        }
+                      }}
+                      onTouchStart={handleTouchStart}
+                      onTouchEnd={handleTouchEnd}
+                      onMouseDown={handleMouseDown}
+                      onMouseUp={handleMouseUp}
+                    />
                   )}
 
                   {/* SCREEN 5: Vocabulary list management Screen */}
@@ -4352,7 +4491,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         {/* Audio File Selection & Copy to Local DB representation */}
                         <div className="space-y-1.5">
                           <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                            AUDIO SYNC FILE
+                            AUDIO & CONTENT (.SRT)
                           </label>
                           <div className="bg-slate-50 border border-slate-200/85 p-2 rounded-xl space-y-2">
                             <div className="flex items-center justify-between">
@@ -4410,25 +4549,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
                         {/* Content Input */}
                         <div className="space-y-2 flex-grow flex flex-col min-h-[160px]">
-                          <div className="flex justify-between items-center">
-                            <label className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider">
-                              CONTENT (SUPPORT .SRT FORMAT)
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!editContent.trim()) {
-                                  setEditContent(
-                                    `1\n00:00:01,000 --> 00:00:04,500\nHello and welcome!\n\n2\n00:00:05,000 --> 00:00:09,000\nThis is a sample SRT subtitle string.`,
-                                  );
-                                }
-                              }}
-                              className="text-[9px] font-bold text-indigo-600 hover:underline cursor-pointer"
-                            >
-                              Template Helper
-                            </button>
-                          </div>
-
                           {/* Quick Commands Toolbar */}
                           <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200/85 p-1 rounded-xl">
                             <input
@@ -4537,13 +4657,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               )}
                             </div>
 
-                            <div className="w-[1px] h-4 bg-slate-200 self-center mx-0.5" />
-
                             <button
                               type="button"
                               onClick={() => setEditorFontSize((prev) => Math.max(10, prev - 1))}
                               disabled={editorFontSize <= 10}
-                              className="p-1 px-1.5 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-200 text-slate-700 rounded-md shadow-3xs active:scale-90 transition-all cursor-pointer text-xs font-bold flex items-center justify-center"
+                              className="ml-3 p-1 px-1.5 bg-white hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed border border-slate-200 text-slate-700 rounded-md shadow-3xs active:scale-90 transition-all cursor-pointer text-xs font-bold flex items-center justify-center"
                               title="Decrease Font Size"
                             >
                               <Minus className="w-3.5 h-3.5" />

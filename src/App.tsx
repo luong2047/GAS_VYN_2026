@@ -348,10 +348,10 @@ export default function App() {
     setArticles(prev => [...prev, newArt]);
   };
 
-  const handleUpdateArticle = (id: number, title: string, type: 'subtitle', content: string, imageUrl?: string, audioUrl?: string) => {
+  const handleUpdateArticle = (id: number, title: string, type: 'subtitle', content: string, imageUrl?: string, audioUrl?: string, notes?: string) => {
     setArticles(prev => prev.map(art => {
       if (art.id === id) {
-        return { ...art, title, type, content, imageUrl, audioUrl };
+        return { ...art, title, type, content, imageUrl, audioUrl, notes: notes !== undefined ? notes : art.notes };
       }
       return art;
     }));
