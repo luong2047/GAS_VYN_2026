@@ -57,13 +57,14 @@ declare global {
 import { Topic, Article, SubtitleSegment, VocabularyItem, AccessLog } from "../types";
 import { PointsToNote } from "./PointsToNote";
 import splashImage from "../assets/images/rabbit_carrot_splash_1781691897305.jpg";
+import { googleSignIn, logout, initAuth } from "../lib/auth";
 
 const ARTICLE_IMAGES = [
-  "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=120&h=120&q=80", // Learning
-  "https://images.unsplash.com/photo-1506880018603-83d5b814b5a6?auto=format&fit=crop&w=120&h=120&q=80", // Reading
-  "https://images.unsplash.com/photo-1546410531-bb4caa6b424d?auto=format&fit=crop&w=120&h=120&q=80", // Book
-  "https://images.unsplash.com/photo-1516979187457-637abb4f9353?auto=format&fit=crop&w=120&h=120&q=80", // Books stack
-  "https://images.unsplash.com/photo-1513258496099-48168024aec0?auto=format&fit=crop&w=120&h=120&q=80", // Education study
+  "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=400&q=80", // Study desk with books
+  "https://images.unsplash.com/photo-1506880018603-83d5b814b5a6?auto=format&fit=crop&w=400&q=80", // Vintage reading
+  "https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=400&q=80", // Digital learning setup
+  "https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&w=400&q=80", // Open book and coffee
+  "https://images.unsplash.com/photo-1512820790803-83ca734da794?auto=format&fit=crop&w=400&q=80", // Library stacks
 ];
 
 export interface TestQuestion {
@@ -383,7 +384,49 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const [isDriveConnected, setIsDriveConnected] = useState<boolean>(() => {
     return localStorage.getItem("vdb_drive_connected") === "true";
   });
+  const [driveEmail, setDriveEmail] = useState<string>(() => {
+    return localStorage.getItem("vdb_drive_email") || "lqluong.2047@gmail.com";
+  });
   const [showSyncSetupDialog, setShowSyncSetupDialog] = useState<boolean>(false);
+
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (user) => {
+        setIsDriveConnected(true);
+        localStorage.setItem("vdb_drive_connected", "true");
+        if (user.email) {
+          setDriveEmail(user.email);
+          localStorage.setItem("vdb_drive_email", user.email);
+        }
+      },
+      () => {
+        setIsDriveConnected(false);
+        localStorage.removeItem("vdb_drive_connected");
+        localStorage.removeItem("vdb_drive_email");
+      }
+    );
+    return () => {
+      if (typeof unsubscribe === "function") {
+        unsubscribe();
+      }
+    };
+  }, []);
+
+  const handleGoogleSignIn = async () => {
+    try {
+      const result = await googleSignIn();
+      if (result) {
+        setIsDriveConnected(true);
+        localStorage.setItem("vdb_drive_connected", "true");
+        if (result.user.email) {
+          setDriveEmail(result.user.email);
+          localStorage.setItem("vdb_drive_email", result.user.email);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to sign in with Google:", error);
+    }
+  };
 
   const compressData = async (text: string): Promise<Blob> => {
     if (typeof CompressionStream !== "undefined") {
@@ -3497,17 +3540,19 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         >
                         {/* Article Cover Hero Graphic */}
                         <div className="px-1 mb-2.5">
-                          <img
-                            src={
-                              selectedArticle.imageUrl ||
-                              ARTICLE_IMAGES[
-                                selectedArticle.id % ARTICLE_IMAGES.length
-                              ]
-                            }
-                            alt="Article Cover"
-                            referrerPolicy="no-referrer"
-                            className="w-full h-36 object-cover rounded-2xl shadow-sm border border-slate-200/80 saturate-110"
-                          />
+                          <div className="relative w-full aspect-video rounded-2xl overflow-hidden shadow-sm border border-slate-200/80">
+                            <img
+                              src={
+                                selectedArticle.imageUrl ||
+                                ARTICLE_IMAGES[
+                                  selectedArticle.id % ARTICLE_IMAGES.length
+                                ]
+                              }
+                              alt="Article Cover"
+                              referrerPolicy="no-referrer"
+                              className="absolute inset-0 w-full h-full object-cover saturate-110"
+                            />
+                          </div>
                         </div>
 
                         {/* SRT segments display list */}
@@ -5032,7 +5077,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               </div>
                               <p className="text-[10px] text-slate-500 font-medium leading-tight">
                                 Active sync account: <br />
-                                <span className="font-mono text-indigo-650 font-semibold select-all break-all text-[9.5px]">lqluong.2047@gmail.com</span>
+                                <span className="font-mono text-indigo-650 font-semibold select-all break-all text-[9.5px]">{driveEmail}</span>
                               </p>
                               <div className="pt-1.5">
                                 <button
@@ -5040,6 +5085,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                   onClick={() => {
                                     setIsDriveConnected(false);
                                     localStorage.removeItem("vdb_drive_connected");
+                                    localStorage.removeItem("vdb_drive_email");
+                                    logout();
                                   }}
                                   className="w-full text-center text-[10px] py-1 text-red-650 hover:bg-red-50 hover:text-red-750 font-bold border border-red-200 rounded-lg transition-colors cursor-pointer"
                                 >
@@ -5054,10 +5101,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               </span>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  setIsDriveConnected(true);
-                                  localStorage.setItem("vdb_drive_connected", "true");
-                                }}
+                                onClick={handleGoogleSignIn}
                                 className="w-full flex items-center justify-center space-x-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 py-2 px-3 rounded-xl transition-all cursor-pointer shadow-3xs"
                               >
                                 <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 shrink-0">

@@ -17,7 +17,10 @@ import {
   AlignLeft,
   AlignCenter,
   AlignRight,
-  Strikethrough
+  Strikethrough,
+  MoreHorizontal,
+  Undo,
+  Redo
 } from "lucide-react";
 import { Article } from "../types";
 
@@ -94,21 +97,81 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
     justifyLeft: true,
     justifyCenter: false,
     justifyRight: false,
-    fontSize: "14"
+    fontSize: "12"
   });
 
-  const [blockTypeOpen, setBlockTypeOpen] = useState(false);
   const [fontSizeOpen, setFontSizeOpen] = useState(false);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const [highlightPickerOpen, setHighlightPickerOpen] = useState(false);
-  const [textStyleOpen, setTextStyleOpen] = useState(false);
-  const [alignOpen, setAlignOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [popupLeft, setPopupLeft] = useState<number>(0);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+
+  const openPopup = (
+    e: React.MouseEvent<HTMLButtonElement>,
+    popupSetter: React.Dispatch<React.SetStateAction<boolean>>,
+    isOpen: boolean,
+    popupWidth: number = 100
+  ) => {
+    setFontSizeOpen(false);
+    setColorPickerOpen(false);
+    setHighlightPickerOpen(false);
+    setMoreOpen(false);
+
+    if (!isOpen) {
+      if (toolbarRef.current) {
+        const buttonRect = e.currentTarget.getBoundingClientRect();
+        const toolbarRect = toolbarRef.current.getBoundingClientRect();
+        let left = buttonRect.left - toolbarRect.left;
+        
+        // Ensure the popup doesn't spill past the right border of the toolbar
+        if (left + popupWidth > toolbarRect.width) {
+          left = Math.max(8, toolbarRect.width - popupWidth - 8);
+        }
+        setPopupLeft(left);
+      }
+      popupSetter(true);
+    }
+  };
 
   const updateActiveStates = () => {
     try {
       const fbVal = String(document.queryCommandValue("formatBlock") || "").toLowerCase();
-      const fsVal = String(document.queryCommandValue("fontSize") || "");
-      const mappedFontSize = SIZE_MAP_REVERSE[fsVal] || "14";
+      
+      let mappedFontSize = "12"; // default
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        let node = range.commonAncestorContainer;
+        if (node && node.nodeType === Node.TEXT_NODE) {
+          node = node.parentNode || node;
+        }
+        let temp: Node | null = node;
+        let foundFont = false;
+        while (temp && temp !== editorRef.current) {
+          if (temp && temp.nodeName === "FONT") {
+            const sizeAttr = (temp as HTMLElement).getAttribute("size");
+            if (sizeAttr) {
+              const mapped = SIZE_MAP_REVERSE[sizeAttr];
+              if (mapped) {
+                mappedFontSize = mapped;
+                foundFont = true;
+                break;
+              }
+            }
+          }
+          temp = temp ? temp.parentNode : null;
+        }
+        
+        // Direct fallback: if we did not find a font tag but there are some inherited browser properties,
+        // we keep the default size "12"
+        if (!foundFont) {
+          const fsVal = String(document.queryCommandValue("fontSize") || "");
+          mappedFontSize = SIZE_MAP_REVERSE[fsVal] || "12";
+        }
+      } else {
+        mappedFontSize = "12";
+      }
 
       setActiveFormats({
         bold: document.queryCommandState("bold"),
@@ -183,6 +246,11 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
   // Execute standard text formatting command
   const format = (command: string, value: string = "") => {
     try {
+      try {
+        document.execCommand("styleWithCSS", false, "false");
+      } catch (e) {
+        // safe fallback
+      }
       if (command === "formatBlock") {
         const success = document.execCommand(command, false, value);
         if (!success) {
@@ -217,12 +285,10 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
   };
 
   const handleEditorClick = () => {
-    setBlockTypeOpen(false);
     setFontSizeOpen(false);
     setColorPickerOpen(false);
     setHighlightPickerOpen(false);
-    setTextStyleOpen(false);
-    setAlignOpen(false);
+    setMoreOpen(false);
   };
 
   return (
@@ -235,495 +301,462 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
     >
       {isEditMode ? (
         /* Edit Mode Layout */
-        <div className="flex-1 flex flex-col min-h-0 bg-white">
-          {/* Elegant full-width single-row toolbar placed directly at the top of the editor */}
-          <div className="bg-white border-b border-slate-200 flex items-center justify-start md:justify-center overflow-x-auto shrink-0 select-none relative z-40 w-full h-11 px-3 gap-0.5 md:gap-1.5 scrollbar-none">
-            
-            {/* Block 1: Body & Heading Selection */}
-            <div className="relative h-full flex items-center px-1 shrink-0">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setBlockTypeOpen(!blockTypeOpen);
-                  setFontSizeOpen(false);
-                  setColorPickerOpen(false);
-                  setHighlightPickerOpen(false);
-                  setTextStyleOpen(false);
-                  setAlignOpen(false);
-                }}
-                className="flex items-center gap-1 px-2 py-1 hover:bg-slate-50 active:bg-slate-100 rounded text-xs font-semibold text-slate-700 transition cursor-pointer min-w-[72px] justify-between h-8 border border-slate-200 bg-white"
-              >
-                <span>{activeFormats.h ? "Heading" : "Body"}</span>
-                <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
-              </button>
+        <div className="flex-1 flex flex-col-reverse min-h-0 bg-white">
+          {/* Elegant full-width single-row toolbar placed directly at the bottom of the editor */}
+          <div 
+            ref={toolbarRef}
+            className="bg-[#FDFDFD] border-t border-slate-200 relative shrink-0 select-none z-40 w-full h-11 flex items-center"
+          >
+            {/* Scrollable button container */}
+            <div className="w-full h-full flex items-center justify-start overflow-x-auto scrollbar-none px-3 gap-0.5 md:gap-1.5">
+              
+              {/* Block 1: Bold, Italic, Underline, Strikethrough (Style Group) - ALWAYS INLINE */}
+              <div className="flex items-center px-1 gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("bold")}
+                  className={`w-7 h-7 flex items-center justify-center rounded transition ${
+                    activeFormats.bold
+                      ? "bg-slate-100 text-slate-900 font-bold"
+                      : "text-slate-700 hover:bg-slate-100/70 cursor-pointer"
+                  }`}
+                  title="Bold"
+                >
+                  <span className="font-serif font-extrabold text-[15px] select-none text-slate-800">B</span>
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("italic")}
+                  className={`w-7 h-7 flex items-center justify-center rounded transition ${
+                    activeFormats.italic
+                      ? "bg-slate-100 text-slate-900 font-semibold"
+                      : "text-slate-700 hover:bg-slate-100/70 cursor-pointer"
+                  }`}
+                  title="Italic"
+                >
+                  <span className="font-serif italic text-[15px] select-none text-slate-850">I</span>
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("underline")}
+                  className={`w-7 h-7 flex items-center justify-center rounded transition ${
+                    activeFormats.underline
+                      ? "bg-slate-100 text-slate-900 font-semibold"
+                      : "text-slate-700 hover:bg-slate-100/70 cursor-pointer"
+                  }`}
+                  title="Underline"
+                >
+                  <span className="font-serif underline text-[15px] select-none text-slate-850">U</span>
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("strikeThrough")}
+                  className={`w-7 h-7 flex items-center justify-center rounded transition ${
+                    activeFormats.strikethrough
+                      ? "bg-slate-100 text-slate-900 font-semibold"
+                      : "text-slate-700 hover:bg-slate-100/70 cursor-pointer"
+                  }`}
+                  title="Strikethrough"
+                >
+                  <span className="font-serif line-through text-[15px] select-none text-slate-850">S</span>
+                </button>
+              </div>
 
-              {blockTypeOpen && (
-                <div className="absolute top-[38px] left-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[100px] text-xs font-medium text-slate-700 animate-slide-up">
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      format("formatBlock", "<p>");
-                      setBlockTypeOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-1.5 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between"
-                  >
-                    <span>Body</span>
-                    {!activeFormats.h && <Check className="w-3.5 h-3.5 text-indigo-650 stroke-[2.5]" />}
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      format("formatBlock", "<h3>");
-                      setBlockTypeOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-1.5 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between"
-                  >
-                    <span>Heading</span>
-                    {activeFormats.h && <Check className="w-3.5 h-3.5 text-indigo-650 stroke-[2.5]" />}
-                  </button>
-                </div>
-              )}
+              {/* Group Divider */}
+              <div className="w-px h-5 bg-[#EEEEEC] shrink-0 self-center mx-1" />
+
+              {/* Block 2: Font Size Selector */}
+              <div className="relative h-full flex items-center px-1 shrink-0">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => openPopup(e, setFontSizeOpen, fontSizeOpen, 70)}
+                  className="flex items-center gap-1 px-2 py-1 hover:bg-slate-100/70 active:bg-slate-200/50 rounded text-xs font-semibold text-slate-700 transition cursor-pointer min-w-[50px] justify-between h-8 bg-transparent"
+                >
+                  <span>{activeFormats.fontSize}</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
+                </button>
+              </div>
+
+              {/* Block 3: Text Color Picker */}
+              <div className="relative h-full flex items-center px-1 shrink-0">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => openPopup(e, setColorPickerOpen, colorPickerOpen, 120)}
+                  className="flex items-center gap-1 px-2 py-1 hover:bg-slate-100/70 active:bg-slate-200/50 rounded text-xs font-semibold text-slate-700 transition cursor-pointer h-8 bg-transparent"
+                >
+                  <div 
+                    className="w-4 h-4 rounded-full border border-slate-200/60 shadow-5xs shrink-0" 
+                    style={{ backgroundColor: activeColor }}
+                  />
+                  <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
+                </button>
+              </div>
+
+              {/* Separator (Desktop only to separate basic text styling from layout items) */}
+              <div className="hidden md:block w-px h-5 bg-[#EEEEEC] shrink-0 self-center mx-1" />
+
+              {/* Block 4: Align Left, Center, Right (Align Group) */}
+              {/* Desktop version (Individual buttons) */}
+              <div className="hidden md:flex items-center px-1.5 gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("justifyLeft")}
+                  className={`w-7 h-7 flex items-center justify-center rounded transition ${
+                    activeFormats.justifyLeft && !activeFormats.justifyCenter && !activeFormats.justifyRight
+                      ? "bg-slate-100 text-indigo-650 font-semibold"
+                      : "text-slate-650 hover:bg-slate-100/70 cursor-pointer"
+                  }`}
+                  title="Align Left"
+                >
+                  <AlignLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("justifyCenter")}
+                  className={`w-7 h-7 flex items-center justify-center rounded transition ${
+                    activeFormats.justifyCenter
+                      ? "bg-slate-100 text-indigo-655 font-semibold"
+                      : "text-slate-650 hover:bg-slate-100/70 cursor-pointer"
+                  }`}
+                  title="Align Center"
+                >
+                  <AlignCenter className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("justifyRight")}
+                  className={`w-7 h-7 flex items-center justify-center rounded transition ${
+                    activeFormats.justifyRight
+                      ? "bg-slate-100 text-indigo-655 font-semibold"
+                      : "text-slate-650 hover:bg-slate-100/70 cursor-pointer"
+                  }`}
+                  title="Align Right"
+                >
+                  <AlignRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Separator (Desktop only) */}
+              <div className="hidden md:block w-px h-5 bg-[#EEEEEC] shrink-0 self-center mx-1" />
+
+              {/* Block 5: Bullet list / Numbered list */}
+              {/* Desktop version */}
+              <div className="hidden md:flex items-center px-1.5 gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("insertUnorderedList")}
+                  className={`w-7 h-7 flex items-center justify-center rounded transition ${
+                    activeFormats.unorderedList
+                      ? "bg-slate-100 text-indigo-655 font-semibold"
+                      : "text-slate-650 hover:bg-slate-100/70 cursor-pointer"
+                  }`}
+                  title="Bullet List"
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("insertOrderedList")}
+                  className={`w-7 h-7 flex items-center justify-center rounded transition ${
+                    activeFormats.orderedList
+                      ? "bg-slate-100 text-indigo-655 font-semibold"
+                      : "text-slate-650 hover:bg-slate-100/70 cursor-pointer"
+                  }`}
+                  title="Numbered List"
+                >
+                  <ListOrdered className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Separator (Desktop only) */}
+              <div className="hidden md:block w-px h-5 bg-[#EEEEEC] shrink-0 self-center mx-1" />
+
+              {/* Block 6: Highlight Picker */}
+              {/* Desktop version */}
+              <div className="hidden md:flex relative h-full flex items-center px-1.5 shrink-0">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => openPopup(e, setHighlightPickerOpen, highlightPickerOpen, 140)}
+                  className={`w-7 h-7 flex flex-col items-center justify-center rounded transition relative cursor-pointer ${
+                    activeHighlight !== "transparent" ? "bg-amber-50 text-amber-750" : "text-slate-650 hover:bg-slate-100/70"
+                  }`}
+                  title="Highlight"
+                >
+                  <Highlighter className="w-3.5 h-3.5" />
+                  {activeHighlight !== "transparent" && (
+                    <div 
+                      className="absolute bottom-1 w-3 h-0.5 rounded-full animate-pulse" 
+                      style={{ backgroundColor: activeHighlight }}
+                    />
+                  )}
+                </button>
+              </div>
+
+              {/* Block 7: Undo & Redo */}
+              {/* Desktop version */}
+              <div className="hidden md:flex items-center px-1.5 gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("undo")}
+                  className="w-7 h-7 flex items-center justify-center rounded transition text-slate-650 hover:bg-slate-100/70 cursor-pointer"
+                  title="Undo"
+                >
+                  <Undo className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => format("redo")}
+                  className="w-7 h-7 flex items-center justify-center rounded transition text-slate-650 hover:bg-slate-100/70 cursor-pointer"
+                  title="Redo"
+                >
+                  <Redo className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              {/* Mobile/Phone version ("..." dropdown grouping Align, List, and Highlight) */}
+              <div className="relative h-full flex items-center px-0.5 md:hidden shrink-0">
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={(e) => openPopup(e, setMoreOpen, moreOpen, 200)}
+                  className="flex items-center justify-center gap-1.5 px-2 py-1 hover:bg-slate-100/70 active:bg-slate-200/50 rounded transition cursor-pointer h-8 text-slate-700 bg-[#FDFDFD]"
+                  title="More Formatting"
+                >
+                  <span className="text-slate-700 font-bold tracking-widest text-[15px] pl-1.5 select-none leading-none pb-1.5">...</span>
+                  <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
+                </button>
+              </div>
+
             </div>
 
-            {/* Separator 1 */}
-            <div className="w-px h-6 bg-[#EEEEEC] shrink-0 self-center mx-1" />
-
-            {/* Block 2: Font Size Selector */}
-            <div className="relative h-full flex items-center px-1 shrink-0">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setFontSizeOpen(!fontSizeOpen);
-                  setBlockTypeOpen(false);
-                  setColorPickerOpen(false);
-                  setHighlightPickerOpen(false);
-                  setTextStyleOpen(false);
-                  setAlignOpen(false);
-                }}
-                className="flex items-center gap-1 px-2 py-1 hover:bg-slate-50 active:bg-slate-100 rounded text-xs font-semibold text-slate-700 transition cursor-pointer min-w-[50px] justify-between h-8 border border-slate-200 bg-white"
+            {/* Dropdowns placed OUTSIDE the scrollable container, inside the parent relative space, with dynamic left-offset! */}
+            {fontSizeOpen && (
+              <div 
+                style={{ left: `${popupLeft}px` }}
+                className="absolute bottom-[44px] bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[70px] text-xs font-medium text-slate-700 animate-slide-up"
               >
-                <span>{activeFormats.fontSize}</span>
-                <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
-              </button>
+                {["10", "12", "14", "16", "18", "20", "24"].map((sz) => (
+                  <button
+                    key={sz}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      format("fontSize", SIZE_MAP[sz]);
+                      setFontSizeOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between"
+                  >
+                    <span>{sz}</span>
+                    {activeFormats.fontSize === sz && <Check className="w-3.5 h-3.5 text-indigo-640 stroke-[2.5]" />}
+                  </button>
+                ))}
+              </div>
+            )}
 
-              {fontSizeOpen && (
-                <div className="absolute top-[38px] left-1 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[70px] text-xs font-medium text-slate-700">
-                  {["10", "12", "14", "16", "18", "20", "24"].map((sz) => (
+            {colorPickerOpen && (
+              <div 
+                style={{ left: `${popupLeft}px` }}
+                className="absolute bottom-[44px] bg-white border border-slate-200 rounded-lg shadow-lg p-2 z-50 w-[120px] animate-slide-up"
+              >
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[
+                    { value: "#3B82F6", label: "Blue" },
+                    { value: "#10B981", label: "Green" },
+                    { value: "#8B5CF6", label: "Purple" },
+                    { value: "#EC4899", label: "Pink" },
+                    { value: "#1F2937", label: "Charcoal" },
+                    { value: "#92400E", label: "Brown" },
+                    { value: "#F97316", label: "Orange" },
+                    { value: "#E11D48", label: "Crimson" },
+                  ].map((cp) => {
+                    const isCurrent = activeColor.toLowerCase() === cp.value.toLowerCase() || 
+                      (cp.value.toLowerCase() === "#1f2937" && (activeColor === "" || activeColor.toLowerCase() === "inherit" || activeColor.toLowerCase() === "#20124d" || activeColor.toLowerCase() === "rgb(32, 18, 77)"));
+                    return (
+                      <button
+                        key={cp.value}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          format("foreColor", cp.value);
+                          setActiveColor(cp.value);
+                          setColorPickerOpen(false);
+                        }}
+                        className="w-5 h-5 rounded-full border border-slate-200/55 flex items-center justify-center transition hover:scale-110 cursor-pointer relative"
+                        style={{ backgroundColor: cp.value }}
+                        title={cp.label}
+                      >
+                        {isCurrent && (
+                          <Check className="w-3 h-3 text-white stroke-[3.5]" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {highlightPickerOpen && (
+              <div 
+                style={{ left: `${popupLeft}px` }}
+                className="absolute bottom-[44px] bg-white border border-slate-200 rounded-lg shadow-lg p-2 z-50 w-[140px] text-xs font-semibold animate-slide-up"
+              >
+                <div className="flex justify-between items-center gap-1.5">
+                  {[
+                    { value: "#FEF08A", label: "Yellow" },
+                    { value: "#BBF7D0", label: "Green" },
+                    { value: "#FBCFE8", label: "Pink" },
+                  ].map((hp) => {
+                    const isCurrent = activeHighlight.toLowerCase() === hp.value.toLowerCase();
+                    return (
+                      <button
+                        key={hp.value}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => {
+                          format("backColor", hp.value);
+                          setActiveHighlight(hp.value);
+                          setHighlightPickerOpen(false);
+                        }}
+                        className="w-5 h-5 rounded border border-slate-150 flex items-center justify-center transition hover:scale-105 cursor-pointer relative"
+                        style={{ backgroundColor: hp.value }}
+                        title={hp.label}
+                      >
+                        {isCurrent && (
+                          <Check className="w-3 h-3 text-slate-800 stroke-[3.5]" />
+                        )}
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      format("backColor", "transparent");
+                      setActiveHighlight("transparent");
+                      setHighlightPickerOpen(false);
+                    }}
+                    className="w-5 h-5 rounded border border-slate-250 flex items-center justify-center hover:bg-slate-100 cursor-pointer text-[10px] font-bold text-slate-500"
+                    title="No Highlight"
+                  >
+                    X
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Mobile/Phone "More" grouped popover */}
+            {moreOpen && (
+              <div 
+                style={{ left: `${popupLeft}px` }}
+                className="absolute bottom-[44px] bg-white border border-slate-200 rounded-lg shadow-lg p-3 z-50 min-w-[200px] flex flex-col gap-3.5 animate-slide-up"
+              >
+                {/* Alignment Option Section */}
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1.5">Alignment</div>
+                  <div className="flex gap-1 bg-slate-50 p-1 rounded-md border border-slate-105">
                     <button
-                      key={sz}
                       type="button"
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={() => {
-                        format("fontSize", SIZE_MAP[sz]);
-                        setFontSizeOpen(false);
+                        format("justifyLeft");
                       }}
-                      className="w-full text-left px-3 py-1.5 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between"
+                      className={`flex-1 h-7 flex items-center justify-center rounded text-xs transition ${
+                        activeFormats.justifyLeft && !activeFormats.justifyCenter && !activeFormats.justifyRight
+                          ? "bg-white text-indigo-600 shadow-2xs font-semibold"
+                          : "text-slate-600 hover:text-slate-950 hover:bg-slate-100/50"
+                      }`}
+                      title="Align Left"
                     >
-                      <span>{sz}</span>
-                      {activeFormats.fontSize === sz && <Check className="w-3.5 h-3.5 text-indigo-640 stroke-[2.5]" />}
+                      <AlignLeft className="w-3.5 h-3.5" />
                     </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Separator 2 */}
-            <div className="w-px h-6 bg-[#EEEEEC] shrink-0 self-center mx-1" />
-
-            {/* Block 3: Text Color Picker */}
-            <div className="relative h-full flex items-center px-1 shrink-0">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setColorPickerOpen(!colorPickerOpen);
-                  setBlockTypeOpen(false);
-                  setFontSizeOpen(false);
-                  setHighlightPickerOpen(false);
-                  setTextStyleOpen(false);
-                  setAlignOpen(false);
-                }}
-                className="flex items-center gap-1 px-2 py-1 hover:bg-slate-50 active:bg-slate-100 rounded text-xs font-semibold text-slate-700 transition cursor-pointer h-8 border border-slate-200 bg-white"
-              >
-                <div 
-                  className="w-4 h-4 rounded-full border border-slate-200 shadow-5xs shrink-0" 
-                  style={{ backgroundColor: activeColor }}
-                />
-                <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
-              </button>
-
-              {colorPickerOpen && (
-                <div className="absolute top-[38px] left-1 bg-white border border-slate-200 rounded-lg shadow-lg p-2 z-50 w-[120px]">
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {[
-                      { value: "#3B82F6", label: "Blue" },
-                      { value: "#10B981", label: "Green" },
-                      { value: "#8B5CF6", label: "Purple" },
-                      { value: "#EC4899", label: "Pink" },
-                      { value: "#1F2937", label: "Charcoal" },
-                      { value: "#92400E", label: "Brown" },
-                      { value: "#F97316", label: "Orange" },
-                      { value: "#E11D48", label: "Crimson" },
-                    ].map((cp) => {
-                      const isCurrent = activeColor.toLowerCase() === cp.value.toLowerCase() || 
-                        (cp.value.toLowerCase() === "#1f2937" && (activeColor === "" || activeColor.toLowerCase() === "inherit" || activeColor.toLowerCase() === "#20124d" || activeColor.toLowerCase() === "rgb(32, 18, 77)"));
-                      return (
-                        <button
-                          key={cp.value}
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            format("foreColor", cp.value);
-                            setActiveColor(cp.value);
-                            setColorPickerOpen(false);
-                          }}
-                          className="w-5 h-5 rounded-full border border-slate-200/50 flex items-center justify-center transition hover:scale-110 cursor-pointer relative"
-                          style={{ backgroundColor: cp.value }}
-                          title={cp.label}
-                        >
-                          {isCurrent && (
-                            <Check className="w-3 h-3 text-white stroke-[3.5]" />
-                          )}
-                        </button>
-                      );
-                    })}
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        format("justifyCenter");
+                      }}
+                      className={`flex-1 h-7 flex items-center justify-center rounded text-xs transition ${
+                        activeFormats.justifyCenter
+                          ? "bg-white text-indigo-600 shadow-2xs font-semibold"
+                          : "text-slate-600 hover:text-slate-950 hover:bg-slate-100/50"
+                      }`}
+                      title="Align Center"
+                    >
+                      <AlignCenter className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        format("justifyRight");
+                      }}
+                      className={`flex-1 h-7 flex items-center justify-center rounded text-xs transition ${
+                        activeFormats.justifyRight
+                          ? "bg-white text-indigo-600 shadow-2xs font-semibold"
+                          : "text-slate-600 hover:text-slate-950 hover:bg-slate-100/50"
+                      }`}
+                      title="Align Right"
+                    >
+                      <AlignRight className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
-              )}
-            </div>
 
-            {/* Separator 3 */}
-            <div className="w-px h-6 bg-[#EEEEEC] shrink-0 self-center mx-1" />
-
-            {/* Block 4: Bold, Italic, Underline, Strikethrough (Style Group) */}
-            {/* Desktop version (Individual buttons) */}
-            <div className="hidden md:flex items-center px-1.5 gap-0.5 shrink-0">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format("bold")}
-                className={`w-7 h-7 flex items-center justify-center rounded transition ${
-                  activeFormats.bold
-                    ? "bg-slate-100 text-slate-900 font-bold"
-                    : "text-slate-700 hover:bg-slate-50 cursor-pointer"
-                }`}
-                title="Bold"
-              >
-                <span className="font-serif font-extrabold text-[15px] select-none text-slate-800">B</span>
-              </button>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format("italic")}
-                className={`w-7 h-7 flex items-center justify-center rounded transition ${
-                  activeFormats.italic
-                    ? "bg-slate-100 text-slate-900 font-semibold"
-                    : "text-slate-700 hover:bg-slate-50 cursor-pointer"
-                }`}
-                title="Italic"
-              >
-                <span className="font-serif italic text-[15px] select-none text-slate-850">I</span>
-              </button>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format("underline")}
-                className={`w-7 h-7 flex items-center justify-center rounded transition ${
-                  activeFormats.underline
-                    ? "bg-slate-100 text-slate-900 font-semibold"
-                    : "text-slate-700 hover:bg-slate-50 cursor-pointer"
-                }`}
-                title="Underline"
-              >
-                <span className="font-serif underline text-[15px] select-none text-slate-850">U</span>
-              </button>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format("strikeThrough")}
-                className={`w-7 h-7 flex items-center justify-center rounded transition ${
-                  activeFormats.strikethrough
-                    ? "bg-slate-100 text-slate-900 font-semibold"
-                    : "text-slate-700 hover:bg-slate-50 cursor-pointer"
-                }`}
-                title="Strikethrough"
-              >
-                <span className="font-serif line-through text-[15px] select-none text-slate-850">S</span>
-              </button>
-            </div>
-
-            {/* Mobile/Phone version ("Text-style" combo box dropdown) */}
-            <div className="relative h-full flex items-center px-0.5 md:hidden shrink-0">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setTextStyleOpen(!textStyleOpen);
-                  setAlignOpen(false);
-                  setBlockTypeOpen(false);
-                  setFontSizeOpen(false);
-                  setColorPickerOpen(false);
-                  setHighlightPickerOpen(false);
-                }}
-                className={`flex items-center gap-1 px-2.5 py-1 hover:bg-slate-50 active:bg-slate-100 rounded text-xs font-semibold text-slate-700 transition cursor-pointer min-w-[88px] justify-between h-8 border ${
-                  activeFormats.bold || activeFormats.italic || activeFormats.underline || activeFormats.strikethrough
-                    ? "border-indigo-200 bg-indigo-50/40 text-indigo-700"
-                    : "border-slate-200 bg-white"
-                }`}
-              >
-                <span className="truncate">
-                  {activeFormats.bold ? "B" : ""}{activeFormats.italic ? "I" : ""}{activeFormats.underline ? "U" : ""}{activeFormats.strikethrough ? "S" : ""}
-                  {!(activeFormats.bold || activeFormats.italic || activeFormats.underline || activeFormats.strikethrough) && "Text-style"}
-                </span>
-                <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
-              </button>
-
-              {textStyleOpen && (
-                <div className="absolute top-[38px] left-0 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[130px] text-xs font-medium text-slate-700 animate-slide-up">
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      format("bold");
-                    }}
-                    className={`w-full text-left px-3 py-2.5 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between ${activeFormats.bold ? "bg-slate-50/50" : ""}`}
-                  >
-                    <span className="font-serif font-extrabold text-[13px] text-slate-900">Bold</span>
-                    {activeFormats.bold && <Check className="w-3.5 h-3.5 text-indigo-600 stroke-[2.5]" />}
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      format("italic");
-                    }}
-                    className={`w-full text-left px-3 py-2.5 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between ${activeFormats.italic ? "bg-slate-50/50" : ""}`}
-                  >
-                    <span className="font-serif italic text-[13px] text-slate-850">Italic</span>
-                    {activeFormats.italic && <Check className="w-3.5 h-3.5 text-indigo-650 stroke-[2.5]" />}
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      format("underline");
-                    }}
-                    className={`w-full text-left px-3 py-2.5 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between ${activeFormats.underline ? "bg-slate-50/50" : ""}`}
-                  >
-                    <span className="font-serif underline text-[13px] text-slate-850">Underline</span>
-                    {activeFormats.underline && <Check className="w-3.5 h-3.5 text-indigo-650 stroke-[2.5]" />}
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      format("strikeThrough");
-                    }}
-                    className={`w-full text-left px-3 py-2.5 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between ${activeFormats.strikethrough ? "bg-slate-50/50" : ""}`}
-                  >
-                    <span className="font-serif line-through text-[13px] text-slate-850">Striked</span>
-                    {activeFormats.strikethrough && <Check className="w-3.5 h-3.5 text-indigo-650 stroke-[2.5]" />}
-                  </button>
+                {/* Lists Option Section */}
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1.5">List Style</div>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        format("insertUnorderedList");
+                      }}
+                      className={`flex-1 h-8 flex items-center justify-center gap-1.5 rounded-md border text-[11px] font-semibold transition ${
+                        activeFormats.unorderedList
+                          ? "bg-indigo-50/70 border-indigo-250 text-indigo-650"
+                          : "border-slate-200 bg-white text-slate-750 hover:bg-slate-55"
+                      }`}
+                    >
+                      <List className="w-3.5 h-3.5" />
+                      <span>Bullet</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        format("insertOrderedList");
+                      }}
+                      className={`flex-1 h-8 flex items-center justify-center gap-1.5 rounded-md border text-[11px] font-semibold transition ${
+                        activeFormats.orderedList
+                          ? "bg-indigo-50/70 border-indigo-250 text-indigo-650"
+                          : "border-slate-200 bg-white text-slate-755 hover:bg-slate-55"
+                      }`}
+                    >
+                      <ListOrdered className="w-3.5 h-3.5" />
+                      <span>Numbered</span>
+                    </button>
+                  </div>
                 </div>
-              )}
-            </div>
 
-            {/* Separator 4 */}
-            <div className="w-px h-6 bg-[#EEEEEC] shrink-0 self-center mx-1" />
-
-            {/* Block 5: Align Left, Center, Right (Align Group) */}
-            {/* Desktop version (Individual buttons) */}
-            <div className="hidden md:flex items-center px-1.5 gap-0.5 shrink-0">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format("justifyLeft")}
-                className={`w-7 h-7 flex items-center justify-center rounded transition ${
-                  activeFormats.justifyLeft && !activeFormats.justifyCenter && !activeFormats.justifyRight
-                    ? "bg-slate-100 text-indigo-600 font-semibold"
-                    : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                }`}
-                title="Align Left"
-              >
-                <AlignLeft className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format("justifyCenter")}
-                className={`w-7 h-7 flex items-center justify-center rounded transition ${
-                  activeFormats.justifyCenter
-                    ? "bg-slate-100 text-indigo-600 font-semibold"
-                    : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                }`}
-                title="Align Center"
-              >
-                <AlignCenter className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format("justifyRight")}
-                className={`w-7 h-7 flex items-center justify-center rounded transition ${
-                  activeFormats.justifyRight
-                    ? "bg-slate-100 text-indigo-600 font-semibold"
-                    : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                }`}
-                title="Align Right"
-              >
-                <AlignRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Mobile/Phone version ("Align" combo box dropdown) */}
-            <div className="relative h-full flex items-center px-0.5 md:hidden shrink-0">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setAlignOpen(!alignOpen);
-                  setTextStyleOpen(false);
-                  setBlockTypeOpen(false);
-                  setFontSizeOpen(false);
-                  setColorPickerOpen(false);
-                  setHighlightPickerOpen(false);
-                }}
-                className={`flex items-center gap-1 px-2 py-1 hover:bg-slate-50 active:bg-slate-100 rounded text-xs font-semibold text-slate-700 transition cursor-pointer min-w-[76px] justify-between h-8 border ${
-                  activeFormats.justifyCenter || activeFormats.justifyRight
-                    ? "border-indigo-200 bg-indigo-50/40 text-indigo-700"
-                    : "border-slate-200 bg-white"
-                }`}
-              >
-                <span className="flex items-center gap-1">
-                  {activeFormats.justifyCenter && <AlignCenter className="w-3 h-3 text-indigo-600" />}
-                  {activeFormats.justifyRight && <AlignRight className="w-3 h-3 text-indigo-600" />}
-                  {!activeFormats.justifyCenter && !activeFormats.justifyRight && <AlignLeft className="w-3 h-3 text-indigo-650" />}
-                  <span>Align</span>
-                </span>
-                <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
-              </button>
-
-              {alignOpen && (
-                <div className="absolute top-[38px] left-0 bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[120px] text-xs font-medium text-slate-700 animate-slide-up">
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      format("justifyLeft");
-                      setAlignOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2.5 hover:bg-slate-50 transition cursor-pointer flex items-center gap-1.5 ${
-                      activeFormats.justifyLeft && !activeFormats.justifyCenter && !activeFormats.justifyRight ? "bg-slate-50 text-indigo-650" : ""
-                    }`}
-                  >
-                    <AlignLeft className="w-3.5 h-3.5 text-slate-600" />
-                    <span>Align Left</span>
-                    {activeFormats.justifyLeft && !activeFormats.justifyCenter && !activeFormats.justifyRight && <Check className="ml-auto w-3.5 h-3.5 text-indigo-650" />}
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      format("justifyCenter");
-                      setAlignOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2.5 hover:bg-slate-50 transition cursor-pointer flex items-center gap-1.5 ${
-                      activeFormats.justifyCenter ? "bg-slate-50 text-indigo-650" : ""
-                    }`}
-                  >
-                    <AlignCenter className="w-3.5 h-3.5 text-slate-600" />
-                    <span>Align Center</span>
-                    {activeFormats.justifyCenter && <Check className="ml-auto w-3.5 h-3.5 text-indigo-650" />}
-                  </button>
-                  <button
-                    type="button"
-                    onMouseDown={(e) => e.preventDefault()}
-                    onClick={() => {
-                      format("justifyRight");
-                      setAlignOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2.5 hover:bg-slate-50 transition cursor-pointer flex items-center gap-1.5 ${
-                      activeFormats.justifyRight ? "bg-slate-50 text-indigo-650" : ""
-                    }`}
-                  >
-                    <AlignRight className="w-3.5 h-3.5 text-slate-600" />
-                    <span>Align Right</span>
-                    {activeFormats.justifyRight && <Check className="ml-auto w-3.5 h-3.5 text-indigo-650" />}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Separator 5 */}
-            <div className="w-px h-6 bg-[#EEEEEC] shrink-0 self-center mx-1" />
-
-            {/* Block 6: Bullet list / Numbered list */}
-            <div className="flex items-center px-1.5 gap-0.5 shrink-0">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format("insertUnorderedList")}
-                className={`w-7 h-7 flex items-center justify-center rounded transition ${
-                  activeFormats.unorderedList
-                    ? "bg-slate-100 text-indigo-600 font-semibold"
-                    : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                }`}
-                title="Bullet List"
-              >
-                <List className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => format("insertOrderedList")}
-                className={`w-7 h-7 flex items-center justify-center rounded transition ${
-                  activeFormats.orderedList
-                    ? "bg-slate-100 text-indigo-600 font-semibold"
-                    : "text-slate-600 hover:bg-slate-50 cursor-pointer"
-                }`}
-                title="Numbered List"
-              >
-                <ListOrdered className="w-3.5 h-3.5" />
-              </button>
-            </div>
-
-            {/* Separator 6 */}
-            <div className="w-px h-6 bg-[#EEEEEC] shrink-0 self-center mx-1" />
-
-            {/* Block 7: Highlight Picker */}
-            <div className="relative h-full flex items-center px-1.5 shrink-0">
-              <button
-                type="button"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  setHighlightPickerOpen(!highlightPickerOpen);
-                  setBlockTypeOpen(false);
-                  setFontSizeOpen(false);
-                  setColorPickerOpen(false);
-                  setTextStyleOpen(false);
-                  setAlignOpen(false);
-                }}
-                className={`w-7 h-7 flex flex-col items-center justify-center rounded transition relative cursor-pointer ${
-                  activeHighlight !== "transparent" ? "bg-amber-50 text-amber-700" : "text-slate-600 hover:bg-slate-50"
-                }`}
-                title="Highlight"
-              >
-                <Highlighter className="w-3.5 h-3.5" />
-                {activeHighlight !== "transparent" && (
-                  <div 
-                    className="absolute bottom-1 w-3 h-0.5 rounded-full animate-pulse" 
-                    style={{ backgroundColor: activeHighlight }}
-                  />
-                )}
-              </button>
-
-              {highlightPickerOpen && (
-                <div className="absolute top-[38px] right-0 bg-white border border-slate-200 rounded-lg shadow-lg p-2 z-50 w-[140px] text-xs font-semibold">
-                  <div className="flex justify-between items-center gap-1.5">
+                {/* Highlight Option Section */}
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1.5">Highlight</div>
+                  <div className="flex justify-between items-center gap-1 border border-slate-200/80 rounded-md p-1 bg-slate-50/60">
                     {[
                       { value: "#FEF08A", label: "Yellow" },
                       { value: "#BBF7D0", label: "Green" },
@@ -738,9 +771,8 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
                           onClick={() => {
                             format("backColor", hp.value);
                             setActiveHighlight(hp.value);
-                            setHighlightPickerOpen(false);
                           }}
-                          className="w-5 h-5 rounded border border-slate-150 flex items-center justify-center transition hover:scale-105 cursor-pointer relative"
+                          className="w-6 h-6 rounded-md border border-slate-300 flex items-center justify-center transition hover:scale-105 cursor-pointer relative shrink-0"
                           style={{ backgroundColor: hp.value }}
                           title={hp.label}
                         >
@@ -756,17 +788,49 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
                       onClick={() => {
                         format("backColor", "transparent");
                         setActiveHighlight("transparent");
-                        setHighlightPickerOpen(false);
                       }}
-                      className="w-5 h-5 rounded border border-slate-250 flex items-center justify-center hover:bg-slate-100 cursor-pointer text-[10px] font-bold text-slate-500"
-                      title="No Highlight"
+                      className={`w-6 h-6 rounded-md border flex items-center justify-center hover:bg-slate-100 cursor-pointer text-[10px] font-bold shrink-0 transition ${
+                        activeHighlight === "transparent"
+                          ? "bg-slate-200 border-slate-300 text-slate-700"
+                          : "bg-white border-slate-200 text-slate-400"
+                      }`}
+                      title="Clear Highlight"
                     >
                       X
                     </button>
                   </div>
                 </div>
-              )}
-            </div>
+
+                {/* Undo / Redo Option Section */}
+                <div>
+                  <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1.5">History</div>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        format("undo");
+                      }}
+                      className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white text-slate-750 hover:bg-slate-50 text-[11px] font-semibold transition cursor-pointer"
+                    >
+                      <Undo className="w-3.5 h-3.5" />
+                      <span>Undo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        format("redo");
+                      }}
+                      className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-md border border-slate-200 bg-white text-slate-750 hover:bg-slate-50 text-[11px] font-semibold transition cursor-pointer"
+                    >
+                      <Redo className="w-3.5 h-3.5" />
+                      <span>Redo</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
           </div>
 
