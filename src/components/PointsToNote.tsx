@@ -68,6 +68,9 @@ const SIZE_MAP: Record<string, string> = {
   "18": "5",
   "20": "6",
   "24": "7",
+  "36": "7",
+  "48": "7",
+  "60": "7",
 };
 
 export const PointsToNote: React.FC<PointsToNoteProps> = ({
@@ -97,7 +100,7 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
     justifyLeft: true,
     justifyCenter: false,
     justifyRight: false,
-    fontSize: "12"
+    fontSize: "14"
   });
 
   const [fontSizeOpen, setFontSizeOpen] = useState(false);
@@ -106,6 +109,38 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
   const [moreOpen, setMoreOpen] = useState(false);
   const [popupLeft, setPopupLeft] = useState<number>(0);
   const toolbarRef = useRef<HTMLDivElement>(null);
+
+  const savedSelectionRangeRef = useRef<Range | null>(null);
+
+  const saveSelection = () => {
+    try {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        if (editorRef.current && editorRef.current.contains(range.commonAncestorContainer)) {
+          savedSelectionRangeRef.current = range.cloneRange();
+        }
+      }
+    } catch (e) {
+      // safe fallback
+    }
+  };
+
+  const restoreSelection = () => {
+    try {
+      if (!editorRef.current) return;
+      editorRef.current.focus();
+      if (savedSelectionRangeRef.current) {
+        const sel = window.getSelection();
+        if (sel) {
+          sel.removeAllRanges();
+          sel.addRange(savedSelectionRangeRef.current);
+        }
+      }
+    } catch (e) {
+      // safe fallback
+    }
+  };
 
   const openPopup = (
     e: React.MouseEvent<HTMLButtonElement>,
@@ -138,39 +173,37 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
     try {
       const fbVal = String(document.queryCommandValue("formatBlock") || "").toLowerCase();
       
-      let mappedFontSize = "12"; // default
+      let mappedFontSize = "14"; // default to 14
       const sel = window.getSelection();
       if (sel && sel.rangeCount > 0) {
         const range = sel.getRangeAt(0);
         let node = range.commonAncestorContainer;
-        if (node && node.nodeType === Node.TEXT_NODE) {
-          node = node.parentNode || node;
-        }
-        let temp: Node | null = node;
-        let foundFont = false;
-        while (temp && temp !== editorRef.current) {
-          if (temp && temp.nodeName === "FONT") {
-            const sizeAttr = (temp as HTMLElement).getAttribute("size");
-            if (sizeAttr) {
-              const mapped = SIZE_MAP_REVERSE[sizeAttr];
-              if (mapped) {
-                mappedFontSize = mapped;
-                foundFont = true;
-                break;
+        if (editorRef.current && editorRef.current.contains(node)) {
+          if (node && node.nodeType === Node.TEXT_NODE) {
+            node = node.parentNode || node;
+          }
+          if (node && node instanceof Element) {
+            const computedFS = window.getComputedStyle(node).fontSize;
+            if (computedFS) {
+              const fsFloat = parseFloat(computedFS);
+              if (!isNaN(fsFloat)) {
+                const rounded = Math.round(fsFloat);
+                const PREDEFINED_SIZES = [10, 12, 14, 16, 18, 20, 24, 36, 48, 60];
+                // Find closest index
+                let closest = PREDEFINED_SIZES[2]; // default to 14
+                let minDiff = Math.abs(rounded - closest);
+                for (const size of PREDEFINED_SIZES) {
+                  const diff = Math.abs(rounded - size);
+                  if (diff < minDiff) {
+                    minDiff = diff;
+                    closest = size;
+                  }
+                }
+                mappedFontSize = String(closest);
               }
             }
           }
-          temp = temp ? temp.parentNode : null;
         }
-        
-        // Direct fallback: if we did not find a font tag but there are some inherited browser properties,
-        // we keep the default size "12"
-        if (!foundFont) {
-          const fsVal = String(document.queryCommandValue("fontSize") || "");
-          mappedFontSize = SIZE_MAP_REVERSE[fsVal] || "12";
-        }
-      } else {
-        mappedFontSize = "12";
       }
 
       setActiveFormats({
@@ -203,6 +236,7 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
 
   useEffect(() => {
     const handleSelectionChange = () => {
+      saveSelection();
       updateActiveStates();
     };
     document.addEventListener("selectionchange", handleSelectionChange);
@@ -211,21 +245,61 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
     };
   }, []);
 
+  // Synchronize standard copy and cut keyboard shortcuts / browser actions to local clipboard fallback
+  useEffect(() => {
+    const handleCopyEvent = (e: ClipboardEvent) => {
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed) {
+        const text = sel.toString();
+        let html = "";
+        if (sel.rangeCount > 0) {
+          try {
+            const range = sel.getRangeAt(0);
+            const container = document.createElement("div");
+            container.appendChild(range.cloneContents());
+            html = container.innerHTML;
+          } catch (err) {
+            console.warn("Failed to get selected HTML in event", err);
+          }
+        }
+        (window as any).appClipboardText = text;
+        (window as any).appClipboardHtml = html || text;
+      }
+    };
+
+    document.addEventListener("copy", handleCopyEvent);
+    document.addEventListener("cut", handleCopyEvent);
+    return () => {
+      document.removeEventListener("copy", handleCopyEvent);
+      document.removeEventListener("cut", handleCopyEvent);
+    };
+  }, []);
+
+  // Helper to check if notes HTML is empty
+  const isHtmlEmpty = (html: string | null | undefined): boolean => {
+    if (!html) return true;
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = html;
+    const text = (tempDiv.textContent || tempDiv.innerText || "").trim();
+    if (text === "Write down something...") return true;
+    const hasMediaOrStructure = tempDiv.querySelector("img, table, iframe, hr, li") !== null;
+    return text === "" && !hasMediaOrStructure;
+  };
+
   // Load notes initially
   useEffect(() => {
-    const defaultText = article.notes || `<b>Important points to note:</b>
-<ul>
-  <li>Double-click or select any text to change its format, color, or highlight.</li>
-  <li>List down key phrases or idioms with corresponding grammar tips.</li>
-  <li>Write down explanations or custom translations for phrases.</li>
-</ul>`;
-    setHtmlContent(defaultText);
+    // For each new article, Points to note currently pre-fills some sample notes; remove that behavior.
+    setHtmlContent(article.notes || "");
   }, [article.id, article.notes]);
 
   // Sync internal state into editable div ref if edited state changes or mounts
   useEffect(() => {
     if (editorRef.current && isEditMode) {
-      editorRef.current.innerHTML = htmlContent;
+      if (isHtmlEmpty(htmlContent)) {
+        editorRef.current.innerHTML = "";
+      } else {
+        editorRef.current.innerHTML = htmlContent;
+      }
       // Focus on editor in edit mode
       setTimeout(() => {
         editorRef.current?.focus();
@@ -238,13 +312,18 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
   const prevEditModeRef = useRef(isEditMode);
   useEffect(() => {
     if (prevEditModeRef.current && !isEditMode) {
-      onSaveNotes(htmlContent);
+      let finalHtml = htmlContent;
+      if (isHtmlEmpty(finalHtml)) {
+        finalHtml = "";
+      }
+      onSaveNotes(finalHtml);
     }
     prevEditModeRef.current = isEditMode;
   }, [isEditMode, htmlContent, onSaveNotes]);
 
   // Execute standard text formatting command
   const format = (command: string, value: string = "") => {
+    restoreSelection();
     try {
       try {
         document.execCommand("styleWithCSS", false, "false");
@@ -256,6 +335,18 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
         if (!success) {
           const stripped = value.replace(/[<>]/g, "");
           document.execCommand(command, false, stripped);
+        }
+      } else if (command === "fontSize") {
+        const sz = value; // e.g. "36", "14", etc.
+        const standardSize = SIZE_MAP[sz] || "7";
+        document.execCommand("fontSize", false, standardSize);
+        if (editorRef.current) {
+          const fontElements = editorRef.current.querySelectorAll(`font[size="${standardSize}"]`);
+          fontElements.forEach((el) => {
+            el.removeAttribute("size");
+            (el as HTMLElement).style.fontSize = `${sz}px`;
+            el.setAttribute("data-custom-size", sz);
+          });
         }
       } else {
         document.execCommand(command, false, value);
@@ -280,8 +371,195 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
     if (editorRef.current) {
       finalHtml = editorRef.current.innerHTML;
     }
+    if (isHtmlEmpty(finalHtml)) {
+      finalHtml = "";
+    }
     onSaveNotes(finalHtml);
     setIsEditMode(false);
+  };
+
+  const handleCut = async () => {
+    restoreSelection();
+    try {
+      const sel = window.getSelection();
+      let selectedText = "";
+      let selectedHtml = "";
+      if (sel && !sel.isCollapsed) {
+        selectedText = sel.toString();
+        if (sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const container = document.createElement("div");
+          container.appendChild(range.cloneContents());
+          selectedHtml = container.innerHTML;
+        }
+      }
+
+      if (selectedText) {
+        (window as any).appClipboardText = selectedText;
+        (window as any).appClipboardHtml = selectedHtml || selectedText;
+      }
+
+      const success = document.execCommand("cut");
+      if (!success && selectedText) {
+        try {
+          await navigator.clipboard.writeText(selectedText);
+        } catch (e) {
+          // ignore
+        }
+        document.execCommand("delete");
+      }
+    } catch (err) {
+      console.warn("Cut failed", err);
+    }
+    if (editorRef.current) {
+      setHtmlContent(editorRef.current.innerHTML);
+    }
+    updateActiveStates();
+  };
+
+  const handleCopy = async () => {
+    restoreSelection();
+    try {
+      const sel = window.getSelection();
+      let selectedText = "";
+      let selectedHtml = "";
+      if (sel && !sel.isCollapsed) {
+        selectedText = sel.toString();
+        if (sel.rangeCount > 0) {
+          const range = sel.getRangeAt(0);
+          const container = document.createElement("div");
+          container.appendChild(range.cloneContents());
+          selectedHtml = container.innerHTML;
+        }
+      }
+
+      if (selectedText) {
+        (window as any).appClipboardText = selectedText;
+        (window as any).appClipboardHtml = selectedHtml || selectedText;
+      }
+
+      const success = document.execCommand("copy");
+      if (!success && selectedText) {
+        try {
+          await navigator.clipboard.writeText(selectedText);
+        } catch (e) {
+          // ignore
+        }
+      }
+    } catch (err) {
+      console.warn("Copy failed", err);
+    }
+  };
+
+  const handlePaste = async () => {
+    restoreSelection();
+    let pasted = false;
+
+    // 1. Try modern rich text clipboard API (navigator.clipboard.read)
+    try {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        const items = await navigator.clipboard.read();
+        let htmlText = "";
+        let plainText = "";
+
+        for (const item of items) {
+          if (item.types.includes("text/html")) {
+            const blob = await item.getType("text/html");
+            htmlText = await blob.text();
+          }
+          if (item.types.includes("text/plain")) {
+            const blob = await item.getType("text/plain");
+            plainText = await blob.text();
+          }
+        }
+
+        if (htmlText) {
+          document.execCommand("insertHTML", false, htmlText);
+          pasted = true;
+        } else if (plainText) {
+          document.execCommand("insertText", false, plainText);
+          pasted = true;
+        }
+      }
+    } catch (err) {
+      console.warn("Navigator clipboard read failed, using local/fallback", err);
+    }
+
+    // 2. Try rich local clipboard fallback if system rich paste didn't succeed
+    if (!pasted) {
+      const html = (window as any).appClipboardHtml;
+      if (html) {
+        try {
+          document.execCommand("insertHTML", false, html);
+          pasted = true;
+        } catch (e) {
+          console.warn("InsertHTML fallback failed", e);
+        }
+      }
+    }
+
+    // 3. Try plain text clipboard APIs (readText)
+    if (!pasted) {
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            document.execCommand("insertText", false, text);
+            pasted = true;
+          }
+        }
+      } catch (err) {
+        console.warn("Navigator clipboard readText failed", err);
+      }
+    }
+
+    // 4. Try plain text local fallback
+    if (!pasted) {
+      const text = (window as any).appClipboardText;
+      if (text) {
+        document.execCommand("insertText", false, text);
+        pasted = true;
+      }
+    }
+
+    if (editorRef.current) {
+      setHtmlContent(editorRef.current.innerHTML);
+    }
+    updateActiveStates();
+  };
+
+  const handlePasteNoFormat = async () => {
+    restoreSelection();
+    let pasted = false;
+
+    // 1. Try reading from navigator.clipboard
+    try {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+          const plainText = text.replace(/<[^>]*>/g, "");
+          document.execCommand("insertText", false, plainText);
+          pasted = true;
+        }
+      }
+    } catch (err) {
+      console.warn("Navigator clipboard read failed in paste no format", err);
+    }
+
+    // 2. Fallback to app-level local clipboard
+    if (!pasted) {
+      const text = (window as any).appClipboardText;
+      if (text) {
+        const plainText = text.replace(/<[^>]*>/g, "");
+        document.execCommand("insertText", false, plainText);
+        pasted = true;
+      }
+    }
+
+    if (editorRef.current) {
+      setHtmlContent(editorRef.current.innerHTML);
+    }
+    updateActiveStates();
   };
 
   const handleEditorClick = () => {
@@ -289,6 +567,7 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
     setColorPickerOpen(false);
     setHighlightPickerOpen(false);
     setMoreOpen(false);
+    saveSelection();
   };
 
   return (
@@ -504,6 +783,9 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
                 </button>
               </div>
 
+              {/* Separator (Desktop only) */}
+              <div className="hidden md:block w-px h-5 bg-[#EEEEEC] shrink-0 self-center mx-1" />
+
               {/* Block 7: Undo & Redo */}
               {/* Desktop version */}
               <div className="hidden md:flex items-center px-1.5 gap-0.5 shrink-0">
@@ -527,6 +809,8 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
                 </button>
               </div>
 
+
+
               {/* Mobile/Phone version ("..." dropdown grouping Align, List, and Highlight) */}
               <div className="relative h-full flex items-center px-0.5 md:hidden shrink-0">
                 <button
@@ -549,13 +833,13 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
                 style={{ left: `${popupLeft}px` }}
                 className="absolute bottom-[44px] bg-white border border-slate-200 rounded-lg shadow-lg py-1 z-50 min-w-[70px] text-xs font-medium text-slate-700 animate-slide-up"
               >
-                {["10", "12", "14", "16", "18", "20", "24"].map((sz) => (
+                {["10", "12", "14", "16", "18", "20", "24", "36", "48", "60"].map((sz) => (
                   <button
                     key={sz}
                     type="button"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
-                      format("fontSize", SIZE_MAP[sz]);
+                      format("fontSize", sz);
                       setFontSizeOpen(false);
                     }}
                     className="w-full text-left px-3 py-1.5 hover:bg-slate-50 transition cursor-pointer flex items-center justify-between"
@@ -829,6 +1113,8 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
                     </button>
                   </div>
                 </div>
+
+
               </div>
             )}
 
@@ -847,25 +1133,29 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
               className="min-h-full outline-none rich-editor-content prose max-w-none text-left select-text p-1 leading-relaxed"
               style={{
                 fontFamily: "'Fira Sans Condensed', sans-serif",
-                fontSize: "12px",
+                fontSize: "14px",
                 fontWeight: 400,
                 color: "#20124D",
               }}
-              placeholder="Start typing your formatted linguist notes here (Bold, Color, Lists)..."
+              placeholder="Write down something..."
             />
           </div>
         </div>
       ) : (
         /* Read Mode Layout */
-        <div className="flex-1 flex flex-col bg-white min-h-0">
+        <div 
+          className="flex-1 flex flex-col bg-white min-h-0 select-text"
+          onDoubleClick={() => setIsEditMode(true)}
+          title="Double-click to edit notes"
+        >
           <div className="flex-1 p-5 overflow-y-auto text-left leading-relaxed">
-            {htmlContent ? (
+            {htmlContent && !isHtmlEmpty(htmlContent) ? (
               <div
                 dangerouslySetInnerHTML={{ __html: htmlContent }}
                 className="rich-editor-content prose max-w-none select-text"
                 style={{
                   fontFamily: "'Fira Sans Condensed', sans-serif",
-                  fontSize: "12px",
+                  fontSize: "14px",
                   fontWeight: 400,
                   color: "#20124D",
                 }}
@@ -873,9 +1163,9 @@ export const PointsToNote: React.FC<PointsToNoteProps> = ({
             ) : (
               <div 
                 className="text-center py-20 text-slate-400 italic select-none"
-                style={{ fontFamily: "'Fira Sans Condensed', sans-serif", fontSize: "12px" }}
+                style={{ fontFamily: "'Fira Sans Condensed', sans-serif", fontSize: "14px" }}
               >
-                No notes created yet. Click edit at the top to add formatted linguist points!
+                Write down something...
               </div>
             )}
           </div>

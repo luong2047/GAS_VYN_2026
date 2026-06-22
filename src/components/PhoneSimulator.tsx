@@ -754,6 +754,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   };
   const [isEditingNew, setIsEditingNew] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showHelpDialog, setShowHelpDialog] = useState(false);
   const [showTranslation, setShowTranslation] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [customColor, setCustomColor] = useState("#ef4444");
@@ -781,6 +782,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     percentage: number;
   } | null>(null);
   const [vocabFontSize, setVocabFontSize] = useState<string>("text-[13px]");
+  const [quizFontSizeIndex, setQuizFontSizeIndex] = useState<number>(2);
+  const quizQuestionSizes = ["10px", "12px", "14px", "15.5px", "18px", "22px", "28px", "35px", "42px", "50px", "60px"];
+  const quizChoiceSizes = ["9px", "10.5px", "12px", "13.5px", "15px", "18.5px", "23px", "30px", "38px", "48px", "60px"];
+  const [readPause, setReadPause] = useState<number>(1.5);
+  const [isEditVocabularyActive, setIsEditVocabularyActive] = useState<boolean>(false);
   const [isVocabMenuOpen, setIsVocabMenuOpen] = useState(false);
   const [isInsertExpressionExpanded, setIsInsertExpressionExpanded] = useState(true);
 
@@ -1612,7 +1618,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
       autoReadTimeoutRef.current = setTimeout(() => {
         playVocabularyAt(index + 1, vocabList);
-      }, 1500);
+      }, readPause * 1000);
     };
 
     playVocabularyTts(
@@ -1759,6 +1765,10 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     "text-[22px]",
     "text-[26px]",
     "text-[32px]",
+    "text-[38px]",
+    "text-[44px]",
+    "text-[50px]",
+    "text-[60px]",
   ];
 
   // Dynamically load web speech synthesis voices with a robust polling fallback and multiple events for mobile/WebView
@@ -1874,6 +1884,62 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     goBackRef.current = goBack;
   }, [goBack]);
 
+  // Helper change handlers to update and persist state per article
+  const handleVocabFontZoom = (newSize: string) => {
+    setVocabFontSize(newSize);
+    if (selectedArticle) {
+       localStorage.setItem("vocab_zoom_" + selectedArticle.id, newSize);
+    }
+  };
+
+  const handleQuizFontZoom = (newIdx: number) => {
+    setQuizFontSizeIndex(newIdx);
+    if (selectedArticle) {
+       localStorage.setItem("quiz_zoom_idx_" + selectedArticle.id, String(newIdx));
+    }
+  };
+
+  const handleReadPauseChange = (precision: number) => {
+    setReadPause(precision);
+    if (selectedArticle) {
+      localStorage.setItem("read_pause_" + selectedArticle.id, String(precision));
+    }
+  };
+
+  // Load remembered zoom settings and pause settings per article
+  useEffect(() => {
+    if (selectedArticle) {
+      // 1. Vocab card font size
+      const savedVocabFontSize = localStorage.getItem("vocab_zoom_" + selectedArticle.id);
+      if (savedVocabFontSize && vocabFontSizes.includes(savedVocabFontSize)) {
+        setVocabFontSize(savedVocabFontSize);
+      } else {
+        setVocabFontSize("text-[13px]"); // Default
+      }
+
+      // 2. Quiz card zoom index
+      const savedQuizFontSizeIndex = localStorage.getItem("quiz_zoom_idx_" + selectedArticle.id);
+      if (savedQuizFontSizeIndex !== null) {
+        const parsed = parseInt(savedQuizFontSizeIndex, 10);
+        if (!isNaN(parsed) && parsed >= 0 && parsed < quizChoiceSizes.length) {
+          setQuizFontSizeIndex(parsed);
+        } else {
+          setQuizFontSizeIndex(2); // Default
+        }
+      } else {
+        setQuizFontSizeIndex(2); // Default
+      }
+
+      // 3. Read All pause settings
+      const savedPause = localStorage.getItem("read_pause_" + selectedArticle.id);
+      if (savedPause) {
+        setReadPause(parseFloat(savedPause));
+      } else {
+        setReadPause(1.5); // Default
+      }
+    }
+  }, [selectedArticle]);
+
   useEffect(() => {
     let backListenerPromise: Promise<any> | null = null;
     const initBackButton = async () => {
@@ -1907,6 +1973,20 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   // Autoread and quiz cleanup on screen or article selection change
   useEffect(() => {
+    // Pause main article audio and speech/TTS when switching to Vocabulary or Points to Note
+    if (currentScreen === "vocabulary" || currentScreen === "points-to-note") {
+      setIsPlaying(false);
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      if (onlineTtsAudioRef.current) {
+        try { onlineTtsAudioRef.current.pause(); } catch (err) {}
+      }
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    }
+
     if (currentScreen !== "vocabulary") {
       stopAutoReading();
       setIsTesting(false);
@@ -1938,6 +2018,32 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
+  const isSrtFormat = !!(
+    selectedArticle &&
+    (selectedArticle.type === "subtitle" ||
+      (selectedArticle.content &&
+        (selectedArticle.content.includes("-->") ||
+          selectedArticle.content.toLowerCase().includes("webvtt") ||
+          /\d{2}:\d{2}/.test(selectedArticle.content))))
+  );
+
+  const isActualSubtitle = React.useMemo(() => {
+    if (!selectedArticle?.content) return false;
+    const parsed = subtitleParser(selectedArticle.content);
+    return parsed.length > 0;
+  }, [selectedArticle, subtitleParser]);
+
+  const getAudioDuration = () => {
+    if (audioDurationMs > 0) return audioDurationMs;
+    if (audioPlayerRef.current && !isNaN(audioPlayerRef.current.duration) && audioPlayerRef.current.duration > 0) {
+      return audioPlayerRef.current.duration * 1000;
+    }
+    if (isSrtFormat && parsedSegments.length > 0) {
+      return parsedSegments[parsedSegments.length - 1].endTimeMs;
+    }
+    return 0; // fallback to 00:00 (4 digits)
+  };
 
   const handleOpenFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2139,7 +2245,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   // Handle active subtitle segment highlighting
   useEffect(() => {
-    if (selectedArticle?.type === "subtitle" && parsedSegments.length > 0) {
+    if (isSrtFormat && selectedArticle?.type === "subtitle" && parsedSegments.length > 0) {
+      if (!isActualSubtitle) {
+        setActiveSegmentIndex(-1);
+        return;
+      }
       const idx = parsedSegments.findIndex(
         (seg) => playbackMs >= seg.startTimeMs && playbackMs <= seg.endTimeMs,
       );
@@ -2157,7 +2267,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         }
       }
     }
-  }, [playbackMs, parsedSegments, selectedArticle]);
+  }, [playbackMs, parsedSegments, selectedArticle, isSrtFormat, isActualSubtitle]);
 
   // Sync real audio controls when isPlaying state changes
   useEffect(() => {
@@ -2694,6 +2804,17 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                     </button>
                   )}
 
+                  {currentScreen === "edit-article" && isEditingNew && (
+                    <button
+                      type="button"
+                      onClick={() => setShowHelpDialog(true)}
+                      className="p-1.5 hover:bg-slate-100 text-slate-650 rounded-full transition-colors cursor-pointer mr-1"
+                      title="Article Formatting Help"
+                    >
+                      <HelpCircle className="w-5 h-5 shrink-0" />
+                    </button>
+                  )}
+
                   {currentScreen === "points-to-note" && selectedArticle && (
                     <div className="flex items-center">
                       <button
@@ -2903,64 +3024,170 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           />
 
                           {/* Floating popover menu */}
-                          <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-xl shadow-xl border border-slate-200/90 z-50 p-3 space-y-3 animate-in fade-in slide-in-from-top-1 duration-100">
-                            {/* Group 1: Vocab font size zoom */}
-                            <div className="text-left">
-                              <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1 font-sans">
-                                Vocab Text Zoom
-                              </span>
-                              <div className="flex items-center justify-between bg-slate-50 border border-slate-200/80 rounded-lg p-1">
-                                <button
-                                  id="btn-vocab-zoom-out"
-                                  onClick={() => {
-                                    const currentIdx =
-                                      vocabFontSizes.indexOf(vocabFontSize);
-                                    if (currentIdx > 0) {
-                                      setVocabFontSize(
-                                        vocabFontSizes[currentIdx - 1],
-                                      );
-                                    }
-                                  }}
-                                  disabled={vocabFontSize === vocabFontSizes[0]}
-                                  className="p-1 px-2 bg-white hover:bg-slate-100 disabled:opacity-40 rounded border border-slate-150 text-slate-700 transition-colors flex items-center justify-center grow cursor-pointer font-bold text-[10px]"
-                                  title="Zoom Out vocab text"
-                                >
-                                  <ZoomOut className="w-3 h-3 mr-1" />
-                                  <span>A-</span>
-                                </button>
+                          <div className="absolute right-0 top-full mt-1 w-56 bg-white rounded-xl shadow-xl border border-slate-200/90 z-50 p-3 space-y-3 animate-in fade-in slide-in-from-top-1 duration-100 font-sans">
+                            {/* Group 1: Vocab font size zoom or Quiz/Question card zoom */}
+                            {!isTesting ? (
+                              <div className="space-y-3">
+                                {/* Edit Vocabulary command */}
+                                <div className="text-left">
+                                  <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+                                    Vocabulary Mode
+                                  </span>
+                                  <button
+                                    id="btn-toggle-edit-vocab"
+                                    onClick={() => {
+                                      setIsEditVocabularyActive((prev) => !prev);
+                                    }}
+                                    className={`w-full flex items-center justify-between border rounded-lg p-2 text-[10.5px] font-bold transition-all cursor-pointer ${
+                                      isEditVocabularyActive
+                                        ? "bg-amber-50 border-amber-300 text-amber-700"
+                                        : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                                    }`}
+                                    title="Toggle show edit and delete actions on cards"
+                                  >
+                                    <span className="flex items-center gap-1.5">
+                                      <Edit className="w-3.5 h-3.5" />
+                                      <span>Edit Vocabulary</span>
+                                    </span>
+                                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full uppercase ${
+                                      isEditVocabularyActive ? 'bg-amber-200 text-amber-800' : 'bg-slate-200/85 text-slate-500'
+                                    }`}>
+                                      {isEditVocabularyActive ? 'ON' : 'OFF'}
+                                    </span>
+                                  </button>
+                                </div>
 
-                                <span className="text-[10px] font-mono font-bold text-slate-650 px-1 shrink-0 capitalize text-center min-w-[55px]">
-                                  {vocabFontSize
-                                    .replace("text-[", "")
-                                    .replace("]", "")}
-                                </span>
+                                <div className="border-t border-slate-100 pt-3 text-left">
+                                  <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+                                    Vocab Text Zoom
+                                  </span>
+                                  <div className="flex items-center justify-between bg-slate-50 border border-slate-200/80 rounded-lg p-1">
+                                    <button
+                                      id="btn-vocab-zoom-out"
+                                      onClick={() => {
+                                        const currentIdx =
+                                          vocabFontSizes.indexOf(vocabFontSize);
+                                        if (currentIdx > 0) {
+                                          handleVocabFontZoom(
+                                            vocabFontSizes[currentIdx - 1],
+                                          );
+                                        }
+                                      }}
+                                      disabled={vocabFontSize === vocabFontSizes[0]}
+                                      className="p-1 px-2 bg-white hover:bg-slate-100 disabled:opacity-40 rounded border border-slate-150 text-slate-700 transition-colors flex items-center justify-center grow cursor-pointer font-bold text-[10px]"
+                                      title="Zoom Out vocab text"
+                                    >
+                                      <ZoomOut className="w-3 h-3 mr-1" />
+                                      <span>A-</span>
+                                    </button>
 
-                                <button
-                                  id="btn-vocab-zoom-in"
-                                  onClick={() => {
-                                    const currentIdx =
-                                      vocabFontSizes.indexOf(vocabFontSize);
-                                    if (
-                                      currentIdx <
-                                      vocabFontSizes.length - 1
-                                    ) {
-                                      setVocabFontSize(
-                                        vocabFontSizes[currentIdx + 1],
-                                      );
-                                    }
-                                  }}
-                                  disabled={
-                                    vocabFontSize ===
-                                    vocabFontSizes[vocabFontSizes.length - 1]
-                                  }
-                                  className="p-1 px-2 bg-white hover:bg-slate-100 disabled:opacity-40 rounded border border-slate-150 text-slate-700 transition-colors flex items-center justify-center grow cursor-pointer font-bold text-[10px]"
-                                  title="Zoom In vocab text"
-                                >
-                                  <ZoomIn className="w-3 h-3 mr-1" />
-                                  <span>A+</span>
-                                </button>
+                                    <span className="text-[10px] font-mono font-bold text-slate-650 px-1 shrink-0 capitalize text-center min-w-[55px]">
+                                      {vocabFontSize
+                                        .replace("text-[", "")
+                                        .replace("]", "")}
+                                    </span>
+
+                                    <button
+                                      id="btn-vocab-zoom-in"
+                                      onClick={() => {
+                                        const currentIdx =
+                                          vocabFontSizes.indexOf(vocabFontSize);
+                                        if (
+                                          currentIdx <
+                                          vocabFontSizes.length - 1
+                                        ) {
+                                          handleVocabFontZoom(
+                                            vocabFontSizes[currentIdx + 1],
+                                          );
+                                        }
+                                      }}
+                                      disabled={
+                                        vocabFontSize ===
+                                        vocabFontSizes[vocabFontSizes.length - 1]
+                                      }
+                                      className="p-1 px-2 bg-white hover:bg-slate-100 disabled:opacity-40 rounded border border-slate-150 text-slate-700 transition-colors flex items-center justify-center grow cursor-pointer font-bold text-[10px]"
+                                      title="Zoom In vocab text"
+                                    >
+                                      <ZoomIn className="w-3 h-3 mr-1" />
+                                      <span>A+</span>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                {/* Read All Pause duration group */}
+                                <div className="border-t border-slate-100 pt-3 text-left">
+                                  <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+                                    Read All Pause
+                                  </span>
+                                  <div className="bg-slate-50 border border-slate-200/85 rounded-lg p-1.5 flex items-center justify-between">
+                                    <span className="text-[10px] font-semibold text-slate-650">Pause (seconds)</span>
+                                    <select
+                                      id="combo-read-pause"
+                                      value={readPause}
+                                      onChange={(e) => handleReadPauseChange(parseFloat(e.target.value))}
+                                      className="bg-white border border-slate-250 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 rounded px-1.5 py-0.5 text-[10px] font-bold text-slate-800 outline-none cursor-pointer"
+                                    >
+                                      <option value="1.5">1.5s</option>
+                                      <option value="2">2.0s</option>
+                                      <option value="3">3.0s</option>
+                                      <option value="4">4.0s</option>
+                                      <option value="5">5.0s</option>
+                                    </select>
+                                  </div>
+                                </div>
                               </div>
-                            </div>
+                            ) : (
+                              <div className="text-left font-sans animate-in fade-in duration-200">
+                                <span className="block text-[9px] font-bold text-slate-400 tracking-wider uppercase mb-1">
+                                  Question Card Zoom
+                                </span>
+                                <div className="flex items-center justify-between bg-slate-50 border border-slate-200/80 rounded-lg p-1">
+                                  <button
+                                    id="btn-quiz-zoom-out"
+                                    onClick={() => {
+                                      if (quizFontSizeIndex > 0) {
+                                        handleQuizFontZoom(
+                                          quizFontSizeIndex - 1,
+                                        );
+                                      }
+                                    }}
+                                    disabled={quizFontSizeIndex === 0}
+                                    className="p-1 px-2 bg-white hover:bg-slate-100 disabled:opacity-40 rounded border border-slate-150 text-slate-700 transition-colors flex items-center justify-center grow cursor-pointer font-bold text-[10px]"
+                                    title="Zoom Out Quiz Text"
+                                  >
+                                    <ZoomOut className="w-3 h-3 mr-1" />
+                                    <span>A-</span>
+                                  </button>
+
+                                  <span className="text-[10px] font-mono font-bold text-slate-650 px-1 shrink-0 capitalize text-center min-w-[55px]">
+                                    {quizChoiceSizes[quizFontSizeIndex]}
+                                  </span>
+
+                                  <button
+                                    id="btn-quiz-zoom-in"
+                                    onClick={() => {
+                                      if (
+                                        quizFontSizeIndex <
+                                        quizChoiceSizes.length - 1
+                                      ) {
+                                        handleQuizFontZoom(
+                                          quizFontSizeIndex + 1,
+                                        );
+                                      }
+                                    }}
+                                    disabled={
+                                      quizFontSizeIndex ===
+                                      quizChoiceSizes.length - 1
+                                    }
+                                    className="p-1 px-2 bg-white hover:bg-slate-100 disabled:opacity-40 rounded border border-slate-150 text-slate-700 transition-colors flex items-center justify-center grow cursor-pointer font-bold text-[10px]"
+                                    title="Zoom In Quiz Text"
+                                  >
+                                    <ZoomIn className="w-3 h-3 mr-1" />
+                                    <span>A+</span>
+                                  </button>
+                                </div>
+                              </div>
+                            )}
 
                             {/* Language voices Combo Box Group */}
                             <div className="text-left pt-2 border-t border-slate-100 space-y-1.5">
@@ -3555,22 +3782,48 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           </div>
                         </div>
 
-                        {/* SRT segments display list */}
+                        {/* SRT or standard segments display list */}
                         <div className="space-y-1.5 font-sans">
-                          {parsedSegments.length === 0 ? (
+                          {!isSrtFormat ? (
+                            <div
+                              onClick={togglePlay}
+                              className="bg-white border border-slate-200/80 rounded-2xl p-5 shadow-3xs text-left animate-in fade-in duration-200 cursor-pointer select-none hover:border-slate-300 active:scale-[0.995] transition-all"
+                            >
+                              {selectedArticle.content
+                                .split("\n\n")
+                                .map((para, pIdx) => {
+                                  const trimmed = para.trim();
+                                  if (!trimmed) return null;
+                                  return (
+                                    <p
+                                      key={pIdx}
+                                      className={`${fontSizeClass} leading-relaxed font-article text-slate-800 select-text whitespace-pre-wrap ${
+                                        pIdx > 0 ? "mt-4" : ""
+                                      }`}
+                                    >
+                                      {trimmed}
+                                    </p>
+                                  );
+                                })}
+                            </div>
+                          ) : parsedSegments.length === 0 ? (
                             <p className="text-center text-xs text-slate-400 py-12">
                               Parsing SRT subtitle lines...
                             </p>
                           ) : (
                             parsedSegments.map((seg, idx) => {
-                              const isCurrent = idx === activeSegmentIndex;
+                              const isCurrent = isActualSubtitle && idx === activeSegmentIndex;
                               return (
                                 <div
                                   key={seg.index}
                                   data-seg-index={idx}
                                   onClick={() => {
-                                    seekTo(seg.startTimeMs);
-                                    setActiveSegmentIndex(idx);
+                                    if (!isActualSubtitle) {
+                                      togglePlay();
+                                    } else {
+                                      seekTo(seg.startTimeMs);
+                                      setActiveSegmentIndex(idx);
+                                    }
                                   }}
                                   className={`border rounded-xl p-3 px-4 transition-all duration-200 cursor-pointer ${
                                     isCurrent
@@ -3579,7 +3832,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                   }`}
                                 >
                                   <p
-                                    className={`${fontSizeClass} leading-relaxed font-article ${isCurrent ? "font-semibold text-indigo-950" : "text-slate-700"}`}
+                                    className={`${fontSizeClass} leading-relaxed font-article whitespace-pre-wrap ${isCurrent ? "font-semibold text-indigo-950" : "text-slate-700"}`}
                                     dangerouslySetInnerHTML={{
                                       __html: seg.text,
                                     }}
@@ -3603,7 +3856,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                     : fontSizeClass === "text-2xl"
                                                       ? "text-xl"
                                                       : "text-2xl"
-                                        } text-slate-500 font-medium italic select-all leading-normal`}
+                                        } text-slate-500 font-medium italic select-all leading-normal whitespace-pre-wrap`}
                                       >
                                         {seg.translation}
                                       </p>
@@ -3624,9 +3877,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             type="range"
                             min={0}
                             max={
-                              parsedSegments.length > 0
-                                ? parsedSegments[parsedSegments.length - 1]
-                                    .endTimeMs + 1000
+                              getAudioDuration() > 0
+                                ? getAudioDuration()
                                 : 30000
                             }
                             value={playbackMs}
@@ -3696,7 +3948,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               style={{ color: "#BABDB6" }}
                               className="text-[10px] md:text-[11px] font-mono font-bold select-none shrink-0"
                             >
-                              {formatTime(audioDurationMs > 0 ? audioDurationMs : (parsedSegments.length > 0 ? parsedSegments[parsedSegments.length - 1].endTimeMs : 0))}
+                              {formatTime(getAudioDuration())}
                             </span>
                           </div>
                         </div>
@@ -3773,28 +4025,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                   Practice Deck Utilities
                                 </span>
                               </div>
-                              <div className="grid grid-cols-2 gap-2">
-                                <button
-                                  type="button"
-                                  onClick={handleToggleReadAll}
-                                  disabled={
-                                    (selectedArticle.vocabulary || [])
-                                      .length === 0
-                                  }
-                                  className={`flex items-center justify-center space-x-1 cursor-all py-1.5 px-2.5 rounded-lg text-xs font-bold transition-all ${
-                                    (selectedArticle.vocabulary || [])
-                                      .length === 0
-                                      ? "bg-slate-100 text-slate-400 opacity-50 cursor-not-allowed"
-                                      : isReadingAll
-                                        ? "bg-blue-600 hover:bg-blue-700 text-white animate-pulse"
-                                        : "bg-blue-50 hover:bg-blue-100 text-blue-700"
-                                  }`}
-                                >
-                                  <Volume2 className="w-3.5 h-3.5" />
-                                  <span>
-                                    {isReadingAll ? "Stop Read" : "Read All"}
-                                  </span>
-                                </button>
+                              <div className="grid grid-cols-1">
                                 <button
                                   type="button"
                                   onClick={handleToggleTest}
@@ -3886,7 +4117,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 <span className="text-[10px] font-black tracking-wider text-indigo-950 uppercase block text-left">
                                   Part 1
                                 </span>
-                                <span className="text-[9px] text-indigo-600 leading-tight block text-left">
+                                <span className="text-[10px] text-indigo-600 leading-tight block text-left">
                                   Look at the Foreign Word & choose the correct
                                   translation meaning.
                                 </span>
@@ -3908,10 +4139,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                       <p className="text-xs font-bold text-slate-500 uppercase tracking-wider text-[9px] text-left">
                                         Question {idx + 1}
                                       </p>
-                                      <p className="text-sm font-bold text-slate-900 font-article select-all text-left">
+                                      <p 
+                                        className="font-bold text-slate-900 font-article select-all text-left"
+                                        style={{ fontSize: quizQuestionSizes[quizFontSizeIndex] }}
+                                      >
                                         "{q.prompt}"
                                       </p>
-                                      <div className="space-y-1.5">
+                                      <div className="space-y-1.5 font-bold">
                                         {q.options.map((option) => {
                                           const isCorrect =
                                             option === q.correctAnswer;
@@ -3967,7 +4201,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                 className="mt-0.5 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
                                               />
                                               <span
-                                                className={`text-[11px] leading-snug select-text ${fontClass}`}
+                                                className={`leading-snug select-text ${fontClass}`}
+                                                style={{ fontSize: quizChoiceSizes[quizFontSizeIndex] }}
                                               >
                                                 {option}
                                               </span>
@@ -3986,7 +4221,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 <span className="text-[10px] font-black tracking-wider text-teal-950 uppercase block text-left">
                                   Part 2
                                 </span>
-                                <span className="text-[9px] text-teal-600 leading-tight block text-left">
+                                <span className="text-[10px] text-teal-600 leading-tight block text-left">
                                   Look at the Translation & choose the correct
                                   corresponding Foreign vocabulary word.
                                 </span>
@@ -4008,10 +4243,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                       <p className="text-xs font-bold text-slate-500 uppercase tracking-wider text-[9px] text-left">
                                         Question {idx + 1}
                                       </p>
-                                      <p className="text-sm font-bold text-slate-900 font-article select-all text-left">
+                                      <p 
+                                        className="font-bold text-slate-900 font-article select-all text-left"
+                                        style={{ fontSize: quizQuestionSizes[quizFontSizeIndex] }}
+                                      >
                                         "{q.prompt}"
                                       </p>
-                                      <div className="space-y-1.5">
+                                      <div className="space-y-1.5 font-bold">
                                         {q.options.map((option) => {
                                           const isCorrect =
                                             option === q.correctAnswer;
@@ -4067,7 +4305,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                 className="mt-0.5 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5"
                                               />
                                               <span
-                                                className={`text-[11px] leading-snug select-text ${fontClass}`}
+                                                className={`leading-snug select-text ${fontClass}`}
+                                                style={{ fontSize: quizChoiceSizes[quizFontSizeIndex] }}
                                               >
                                                 {option}
                                               </span>
@@ -4324,23 +4563,37 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                 className="w-full bg-white border border-amber-250 rounded-lg px-2 py-1 text-xs font-semibold text-slate-800 outline-none focus:ring-1 focus:ring-amber-400 resize-none select-text"
                                               />
                                             </div>
-                                            <div className="flex items-center justify-end space-x-1.5 pt-1">
+                                            <div className="flex items-center justify-between pt-1">
                                               <button
                                                 type="button"
-                                                onClick={() =>
-                                                  setEditingVocabId(null)
-                                                }
-                                                className="bg-slate-100 hover:bg-slate-200 text-slate-650 font-bold px-2.5 py-1 rounded text-[9px] uppercase tracking-wider transition-all cursor-pointer"
+                                                onClick={() => {
+                                                  handleDeleteVocab(vocab.id);
+                                                  setEditingVocabId(null);
+                                                }}
+                                                className="bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold px-2 py-1 rounded text-[9px] uppercase tracking-wider transition-all cursor-pointer flex items-center space-x-1"
+                                                title="Delete vocabulary item"
                                               >
-                                                Cancel
+                                                <Trash2 className="w-3 h-3 text-rose-600" />
+                                                <span>Delete</span>
                                               </button>
-                                              <button
-                                                type="button"
-                                                onClick={handleSaveEditVocab}
-                                                className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-2.5 py-1 rounded text-[9px] uppercase tracking-wider transition-all cursor-pointer shadow-3xs"
-                                              >
-                                                Save
-                                              </button>
+                                              <div className="flex items-center space-x-1.5 align-middle">
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    setEditingVocabId(null)
+                                                  }
+                                                  className="bg-slate-100 hover:bg-slate-200 text-slate-650 font-bold px-2.5 py-1 rounded text-[9px] uppercase tracking-wider transition-all cursor-pointer"
+                                                >
+                                                  Cancel
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={handleSaveEditVocab}
+                                                  className="bg-amber-600 hover:bg-amber-700 text-white font-bold px-2.5 py-1 rounded text-[9px] uppercase tracking-wider transition-all cursor-pointer shadow-3xs"
+                                                >
+                                                  Save
+                                                </button>
+                                              </div>
                                             </div>
                                           </div>
                                         ) : (
@@ -4365,29 +4618,21 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                   </p>
                                                 </div>
    
-                                                {/* Action buttons (Edit & Delete) */}
-                                                <div className="vocab-item-actions flex items-center space-x-1.5 shrink-0 z-10">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                      handleStartEditVocab(vocab)
-                                                    }
-                                                    className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-indigo-650 transition-colors cursor-pointer"
-                                                    title="Edit vocab"
-                                                  >
-                                                    <Edit className="w-3.5 h-3.5" />
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                      handleDeleteVocab(vocab.id)
-                                                    }
-                                                    className="p-1 hover:bg-red-50 rounded text-slate-400 hover:text-red-650 transition-colors cursor-pointer"
-                                                    title="Delete vocab"
-                                                  >
-                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                  </button>
-                                                </div>
+                                                {/* Action buttons (Edit Only, enlarged 50%) */}
+                                                {isEditVocabularyActive && (
+                                                  <div className="vocab-item-actions flex items-center shrink-0 z-10">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() =>
+                                                        handleStartEditVocab(vocab)
+                                                      }
+                                                      className="p-1.5 hover:bg-slate-100 rounded text-slate-400 hover:text-indigo-650 transition-colors cursor-pointer"
+                                                      title="Edit vocab"
+                                                    >
+                                                      <Edit className="w-[21px] h-[21px]" />
+                                                    </button>
+                                                  </div>
+                                                )}
                                               </div>
    
                                               {/* Example section (Clicking this is ignored for TTS as requested) */}
@@ -4987,6 +5232,56 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             className="px-4 py-1.5 rounded-xl bg-[#f9f9fc] hover:bg-[#eef0f6] text-[#75787a] text-xs font-bold transition-all cursor-pointer border border-slate-200/60 shadow-sm"
                           >
                             OK
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Help Dialog Overlay */}
+                  {showHelpDialog && (
+                    <div
+                      id="help-dialog-overlay"
+                      className="absolute inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-xs"
+                    >
+                      <div
+                        id="help-dialog"
+                        className="bg-white rounded-3xl p-5 shadow-xl border border-slate-200 w-full max-w-[300px] max-h-[85%] flex flex-col space-y-4 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+                      >
+                        <div className="flex-grow overflow-y-auto space-y-2 text-left pr-0.5">
+                          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 sticky top-0 bg-white pb-1 z-10">
+                            <HelpCircle className="w-5 h-5 text-indigo-500 shrink-0" />
+                            Formatting Help
+                          </h3>
+                          <div className="text-[11px] text-slate-600 space-y-2.5 leading-relaxed font-sans">
+                            <p>
+                              The content of the article can be plain text or subtitle text (.srt). With subtitles, users can provide a corresponding translation for each line by using the phrase <code className="bg-slate-100 text-slate-800 px-1 py-0.5 rounded font-mono font-bold">"## "</code> (end with a space) to begin the translation line. For example:
+                            </p>
+                            <pre className="bg-slate-50 text-slate-850 p-2 rounded-xl font-mono text-[9.5px] leading-snug border border-slate-200/50 overflow-x-auto whitespace-pre-wrap select-all">
+1{"\n"}
+00:00:01,000 --&gt; 00:00:04,500{"\n"}
+Entschuldigung, fährt dieser Zug direkt nach München?{"\n"}
+## Excuse me, does this train go directly to Munich?{"\n"}
+{"\n"}
+2{"\n"}
+00:00:05,200 --&gt; 00:00:09,100{"\n"}
+Nein, Sie müssen in Nürnberg umsteigen.{"\n"}
+## No, you have to transfer in Nuremberg.{"\n"}
+{"\n"}
+...
+                            </pre>
+                            <p className="border-t border-slate-100 pt-2 font-medium text-slate-500">
+                              The translation can be shown/hidden using the corresponding command in the article menu.
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex justify-end pt-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowHelpDialog(false)}
+                            className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition-all cursor-pointer shadow-sm"
+                          >
+                            Close
                           </button>
                         </div>
                       </div>
