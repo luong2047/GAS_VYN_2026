@@ -377,6 +377,14 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     return () => clearTimeout(timer);
   }, []);
 
+  const prevScreenRef = useRef<string>("topics");
+  useEffect(() => {
+    prevScreenRef.current = currentScreen;
+  }, [currentScreen]);
+
+  const lastLoadedArticleIdRef = useRef<number | null>(null);
+  const lastLoadedArticleContentRef = useRef<string | null>(null);
+
   // VDB backup states
   const backupFileInputRef = useRef<HTMLInputElement>(null);
   const [vdbStatus, setVdbStatus] = useState<{ type: 'success' | 'error' | 'loading' | null, message: string }>({ type: null, message: "" });
@@ -2009,8 +2017,88 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     return () => clearTimeout(timer);
   }, [currentScreen, selectedArticle, showFloatingAddVocab]);
 
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const listContainerRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
+
+  const isSrtFormat = !!(
+    selectedArticle &&
+    (selectedArticle.type === "subtitle" ||
+      (selectedArticle.content &&
+        (selectedArticle.content.includes("-->") ||
+          selectedArticle.content.toLowerCase().includes("webvtt") ||
+          /\d{2}:\d{2}/.test(selectedArticle.content))))
+  );
+
+  const isActualSubtitle = React.useMemo(() => {
+    if (!selectedArticle?.content) return false;
+    const parsed = subtitleParser(selectedArticle.content);
+    return parsed.length > 0;
+  }, [selectedArticle, subtitleParser]);
+
+  const lastRestoredScreenRef = useRef<string | null>(null);
+  const lastRestoredArticleIdRef = useRef<number | null>(null);
+
   React.useLayoutEffect(() => {
     if (currentScreen === "article-detail" && selectedArticle && listContainerRef.current) {
+      const hasChangedScreenOrArticle = 
+        lastRestoredScreenRef.current !== currentScreen ||
+        lastRestoredArticleIdRef.current !== selectedArticle.id;
+
+      if (!hasChangedScreenOrArticle) {
+        return;
+      }
+
+      // Record that we have now restored the layout for this screen and article
+      lastRestoredScreenRef.current = currentScreen;
+      lastRestoredArticleIdRef.current = selectedArticle.id;
+
+      if (isSrtFormat && isActualSubtitle && parsedSegments.length > 0) {
+        // Find segment matching current playbackMs
+        const idx = parsedSegments.findIndex(
+          (seg) => playbackMs >= seg.startTimeMs && playbackMs <= seg.endTimeMs,
+        );
+        const targetIdx = idx !== -1 ? idx : (activeSegmentIndex !== -1 ? activeSegmentIndex : 0);
+
+        if (targetIdx >= 0) {
+          const scrollActiveSegment = () => {
+            if (listContainerRef.current) {
+              const activeEl = listContainerRef.current.querySelector(
+                `[data-seg-index="${targetIdx}"]`
+              ) as HTMLElement | null;
+              if (activeEl) {
+                const container = listContainerRef.current;
+                const containerRect = container.getBoundingClientRect();
+                const elementRect = activeEl.getBoundingClientRect();
+                
+                // Check if active subtitle card is fully or sufficiently within the visible viewport of the list container
+                const isFullyVisible =
+                  elementRect.top >= containerRect.top - 5 &&
+                  elementRect.bottom <= containerRect.bottom + 5;
+
+                if (!isFullyVisible) {
+                  activeEl.scrollIntoView({ behavior: "auto", block: "center" });
+                }
+              }
+            }
+          };
+
+          // Perform synchronous scroll
+          scrollActiveSegment();
+
+          // Retries for potential async rendering/layout delays
+          const timer1 = setTimeout(scrollActiveSegment, 50);
+          const timer2 = setTimeout(scrollActiveSegment, 150);
+
+          return () => {
+            clearTimeout(timer1);
+            clearTimeout(timer2);
+          };
+        }
+      }
+
       const savedTop = articleScrollMapRef.current[selectedArticle.id] || 0;
       
       // Perform synchronous scroll restoration
@@ -2033,29 +2121,14 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         clearTimeout(timer1);
         clearTimeout(timer2);
       };
+    } else {
+      // If we are not on article-detail screen, reset the refs so that the next time we enter, it triggers
+      if (currentScreen !== "article-detail") {
+        lastRestoredScreenRef.current = null;
+        lastRestoredArticleIdRef.current = null;
+      }
     }
-  }, [currentScreen, selectedArticle]);
-
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const listContainerRef = useRef<HTMLDivElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const audioPlayerRef = useRef<HTMLAudioElement | null>(null);
-
-  const isSrtFormat = !!(
-    selectedArticle &&
-    (selectedArticle.type === "subtitle" ||
-      (selectedArticle.content &&
-        (selectedArticle.content.includes("-->") ||
-          selectedArticle.content.toLowerCase().includes("webvtt") ||
-          /\d{2}:\d{2}/.test(selectedArticle.content))))
-  );
-
-  const isActualSubtitle = React.useMemo(() => {
-    if (!selectedArticle?.content) return false;
-    const parsed = subtitleParser(selectedArticle.content);
-    return parsed.length > 0;
-  }, [selectedArticle, subtitleParser]);
+  }, [currentScreen, selectedArticle, activeSegmentIndex, parsedSegments, playbackMs, isSrtFormat, isActualSubtitle]);
 
   const getAudioDuration = () => {
     if (audioDurationMs > 0) return audioDurationMs;
@@ -2221,50 +2294,82 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   // Parse subtitles when active article is loaded
   useEffect(() => {
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current.currentTime = 0;
-    }
-    if (selectedArticle && selectedArticle.type === "subtitle") {
-      let parsed = subtitleParser(selectedArticle.content);
-      if (
-        parsed.length === 0 &&
-        selectedArticle.content &&
-        selectedArticle.content.trim()
-      ) {
-        parsed = [
-          {
-            index: 1,
-            startTimeMs: 0,
-            endTimeMs: 36000000,
-            text: selectedArticle.content,
-            translation: undefined,
-          },
-        ];
-      }
-      setParsedSegments(parsed);
-      setPlaybackMs(0);
-      setAudioDurationMs(0);
-      setIsPlaying(false);
-      setActiveSegmentIndex(-1);
-
-      const savedUseReal = localStorage.getItem("article_use_real_tts_" + selectedArticle.id);
-      if (savedUseReal !== null) {
-        setUseRealTts(savedUseReal === "true");
-      } else {
-        setUseRealTts(false);
-      }
-
-      const savedLocalVoice = localStorage.getItem("article_local_voice_" + selectedArticle.id);
-      if (savedLocalVoice !== null) {
-        setSelectedLocalVoiceURI(savedLocalVoice);
-      } else {
-        setSelectedLocalVoiceURI("google-en-us");
-      }
-    } else {
+    if (!selectedArticle) {
+      lastLoadedArticleIdRef.current = null;
+      lastLoadedArticleContentRef.current = null;
       setParsedSegments([]);
+      return;
+    }
+
+    const isDifferentArticle = 
+      lastLoadedArticleIdRef.current !== selectedArticle.id ||
+      lastLoadedArticleContentRef.current !== selectedArticle.content;
+
+    if (isDifferentArticle) {
+      lastLoadedArticleIdRef.current = selectedArticle.id;
+      lastLoadedArticleContentRef.current = selectedArticle.content;
+
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+        audioPlayerRef.current.currentTime = 0;
+      }
+      if (selectedArticle.type === "subtitle") {
+        let parsed = subtitleParser(selectedArticle.content);
+        if (
+          parsed.length === 0 &&
+          selectedArticle.content &&
+          selectedArticle.content.trim()
+        ) {
+          parsed = [
+            {
+              index: 1,
+              startTimeMs: 0,
+              endTimeMs: 36000000,
+              text: selectedArticle.content,
+              translation: undefined,
+            },
+          ];
+        }
+        setParsedSegments(parsed);
+        setPlaybackMs(0);
+        setAudioDurationMs(0);
+        setIsPlaying(false);
+        setActiveSegmentIndex(-1);
+
+        const savedUseReal = localStorage.getItem("article_use_real_tts_" + selectedArticle.id);
+        if (savedUseReal !== null) {
+          setUseRealTts(savedUseReal === "true");
+        } else {
+          setUseRealTts(false);
+        }
+
+        const savedLocalVoice = localStorage.getItem("article_local_voice_" + selectedArticle.id);
+        if (savedLocalVoice !== null) {
+          setSelectedLocalVoiceURI(savedLocalVoice);
+        } else {
+          setSelectedLocalVoiceURI("google-en-us");
+        }
+      } else {
+        setParsedSegments([]);
+      }
     }
   }, [selectedArticle]);
+
+  // Pause audio and TTS when floating vocabulary form is opened
+  useEffect(() => {
+    if (showFloatingAddVocab) {
+      setIsPlaying(false);
+      if (audioPlayerRef.current) {
+        audioPlayerRef.current.pause();
+      }
+      if (onlineTtsAudioRef.current) {
+        try { onlineTtsAudioRef.current.pause(); } catch (err) {}
+      }
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+    }
+  }, [showFloatingAddVocab]);
 
   // Handle active subtitle segment highlighting
   useEffect(() => {
@@ -2279,18 +2384,29 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       if (idx !== activeSegmentIndex) {
         setActiveSegmentIndex(idx);
 
-        // Auto scroll matching active line inside the simulated phone
+        // Auto scroll matching active line inside the simulated phone if not already in viewport
         if (idx !== -1 && listContainerRef.current) {
           const activeEl = listContainerRef.current.querySelector(
-            `[data-seg-index="${idx}"]`,
-          );
+            `[data-seg-index="${idx}"]`
+          ) as HTMLElement | null;
           if (activeEl) {
-            activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            const container = listContainerRef.current;
+            const containerRect = container.getBoundingClientRect();
+            const elementRect = activeEl.getBoundingClientRect();
+            
+            // Check if active subtitle card is fully or sufficiently within the visible viewport of the list container
+            const isFullyVisible =
+              elementRect.top >= containerRect.top - 5 &&
+              elementRect.bottom <= containerRect.bottom + 5;
+
+            if (!isFullyVisible) {
+              activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
           }
         }
       }
     }
-  }, [playbackMs, parsedSegments, selectedArticle, isSrtFormat, isActualSubtitle]);
+  }, [playbackMs, parsedSegments, selectedArticle, isSrtFormat, isActualSubtitle, activeSegmentIndex]);
 
   // Sync real audio controls when isPlaying state changes
   useEffect(() => {
@@ -2464,6 +2580,34 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     setPlaybackMs(ms);
     if (audioPlayerRef.current) {
       audioPlayerRef.current.currentTime = ms / 1000;
+    }
+    // Auto scroll matching active line when user changes time-tracker position if not already in viewport
+    if (isSrtFormat && selectedArticle?.type === "subtitle" && parsedSegments.length > 0) {
+      const idx = parsedSegments.findIndex(
+        (seg) => ms >= seg.startTimeMs && ms <= seg.endTimeMs,
+      );
+      if (idx !== -1) {
+        setActiveSegmentIndex(idx);
+        if (listContainerRef.current) {
+          const activeEl = listContainerRef.current.querySelector(
+            `[data-seg-index="${idx}"]`
+          ) as HTMLElement | null;
+          if (activeEl) {
+            const container = listContainerRef.current;
+            const containerRect = container.getBoundingClientRect();
+            const elementRect = activeEl.getBoundingClientRect();
+            
+            // Check if active subtitle card is fully or sufficiently within the visible viewport of the list container
+            const isFullyVisible =
+              elementRect.top >= containerRect.top - 5 &&
+              elementRect.bottom <= containerRect.bottom + 5;
+
+            if (!isFullyVisible) {
+              activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+          }
+        }
+      }
     }
   };
 
@@ -4029,7 +4173,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                     <input
                                       type="text"
                                       required
-                                      placeholder="Enter word (e.g. ubiquitous)"
+                                      placeholder=""
                                       value={newWord}
                                       onChange={(e) => setNewWord(e.target.value)}
                                       className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none transition-all"
@@ -4043,7 +4187,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                     <textarea
                                       required
                                       rows={2}
-                                      placeholder="Enter meaning or translation"
+                                      placeholder=""
                                       value={newDefinition}
                                       onChange={(e) => setNewDefinition(e.target.value)}
                                       className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none transition-all resize-none"
@@ -4056,7 +4200,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                     </label>
                                     <textarea
                                       rows={2}
-                                      placeholder="Enter example context"
+                                      placeholder=""
                                       value={newExample}
                                       onChange={(e) => setNewExample(e.target.value)}
                                       className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none transition-all resize-none"
@@ -5347,8 +5491,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       >
                         <div className="space-y-2 text-left">
                           <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                            <HelpCircle className="w-5 h-5 text-indigo-500 shrink-0" />
-                            About App
+                            <span className="text-base shrink-0">☪️</span>
+                            About VYN
                           </h3>
                           <div className="text-[11px] text-slate-650 space-y-2 leading-relaxed">
                             <p>
@@ -5362,7 +5506,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               <strong className="text-slate-850">
                                 Year Created:
                               </strong>{" "}
-                              2026
+                              Summer 2026
                             </p>
                             <p>
                               <strong className="text-slate-850 font-bold">
