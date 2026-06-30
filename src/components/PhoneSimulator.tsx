@@ -51,6 +51,8 @@ import {
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { TextToSpeech } from "@capacitor-community/text-to-speech";
+import { Filesystem, Directory } from "@capacitor/filesystem";
+import { Share } from "@capacitor/share";
 
 declare global {
   interface Window {
@@ -61,7 +63,6 @@ declare global {
 import { Topic, Article, SubtitleSegment, VocabularyItem, AccessLog } from "../types";
 import { PointsToNote } from "./PointsToNote";
 import splashImage from "../assets/images/rabbit_carrot_splash_1781691897305.jpg";
-import { googleSignIn, logout, initAuth } from "../lib/auth";
 
 const ARTICLE_IMAGES = [
   "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=400&q=80", // Study desk with books
@@ -112,7 +113,6 @@ interface PhoneSimulatorProps {
   onUpdateTopic?: (id: number, title: string, desc: string) => void;
   onDeleteTopic?: (id: number) => void;
   onImportData?: (topics: Topic[], articles: Article[], accessLogs: AccessLog[]) => void;
-  onGoogleDriveSync?: (direction: 'upload' | 'download', onComplete: (msg: string) => void) => void;
 }
 
 const CustomDatePicker: React.FC<{
@@ -348,7 +348,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   onUpdateTopic,
   onDeleteTopic,
   onImportData,
-  onGoogleDriveSync,
 }) => {
   const [currentScreen, setCurrentScreen] = useState<
     | "topics"
@@ -376,66 +375,10 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     return () => clearTimeout(timer);
   }, []);
 
-  // VDB backup and manual Google Drive sync states
+  // VDB backup states
   const backupFileInputRef = useRef<HTMLInputElement>(null);
   const [vdbStatus, setVdbStatus] = useState<{ type: 'success' | 'error' | 'loading' | null, message: string }>({ type: null, message: "" });
   const articleScrollMapRef = useRef<Record<number, number>>({});
-  const [syncStatus, setSyncStatus] = useState<{ isSyncing: boolean, direction: 'upload' | 'download' | 'commit' | 'refresh' | null, progress: number, message: string }>({
-    isSyncing: false,
-    direction: null,
-    progress: 0,
-    message: ""
-  });
-  const [sharedDriveLink, setSharedDriveLink] = useState<string>(() => localStorage.getItem("vdb_shared_drive_link") || "");
-  const [joinLinkInput, setJoinLinkInput] = useState<string>("");
-  const [isHostPhone, setIsHostPhone] = useState<boolean>(() => localStorage.getItem("vdb_is_host_phone") === "true");
-  const [sharedLinkCopied, setSharedLinkCopied] = useState<boolean>(false);
-  const [isDriveConnected, setIsDriveConnected] = useState<boolean>(() => {
-    return localStorage.getItem("vdb_drive_connected") === "true";
-  });
-  const [driveEmail, setDriveEmail] = useState<string>(() => {
-    return localStorage.getItem("vdb_drive_email") || "lqluong.2047@gmail.com";
-  });
-  const [showSyncSetupDialog, setShowSyncSetupDialog] = useState<boolean>(false);
-
-  useEffect(() => {
-    const unsubscribe = initAuth(
-      (user) => {
-        setIsDriveConnected(true);
-        localStorage.setItem("vdb_drive_connected", "true");
-        if (user.email) {
-          setDriveEmail(user.email);
-          localStorage.setItem("vdb_drive_email", user.email);
-        }
-      },
-      () => {
-        setIsDriveConnected(false);
-        localStorage.removeItem("vdb_drive_connected");
-        localStorage.removeItem("vdb_drive_email");
-      }
-    );
-    return () => {
-      if (typeof unsubscribe === "function") {
-        unsubscribe();
-      }
-    };
-  }, []);
-
-  const handleGoogleSignIn = async () => {
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setIsDriveConnected(true);
-        localStorage.setItem("vdb_drive_connected", "true");
-        if (result.user.email) {
-          setDriveEmail(result.user.email);
-          localStorage.setItem("vdb_drive_email", result.user.email);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to sign in with Google:", error);
-    }
-  };
 
   const compressData = async (text: string): Promise<Blob> => {
     if (typeof CompressionStream !== "undefined") {
@@ -473,16 +416,93 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       };
       const jsonString = JSON.stringify(dataToExport);
       const blob = await compressData(jsonString);
+      const fileName = `backup_${new Date().toISOString().slice(0, 10)}.vdb`;
 
+      // 1. Capacitor Native phone app (Android/iOS)
+      if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+        const reader = new FileReader();
+        reader.readAsDataURL(blob);
+        reader.onloadend = async () => {
+          try {
+            const base64Data = (reader.result as string).split(',')[1];
+            const result = await Filesystem.writeFile({
+              path: fileName,
+              data: base64Data,
+              directory: Directory.Documents
+            });
+            await Share.share({
+              title: 'Export Backup',
+              text: 'Choose where to save your backup file (.vdb)',
+              url: result.uri,
+              dialogTitle: 'Save Backup Location'
+            });
+            setVdbStatus({ type: 'success', message: "Backup saved to default Documents folder & shared successfully!" });
+            setTimeout(() => setVdbStatus({ type: null, message: "" }), 4000);
+          } catch (e: any) {
+            setVdbStatus({ type: 'success', message: "Backup file saved to default device Documents folder!" });
+            setTimeout(() => setVdbStatus({ type: null, message: "" }), 4000);
+          }
+        };
+        return;
+      }
+
+      // 2. Web Share API (extremely effective on real phones in mobile browsers like Safari/Chrome to prompt location selection / native save sheet)
+      if (navigator.share) {
+        try {
+          const file = new File([blob], fileName, { type: 'application/octet-stream' });
+          if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+              files: [file],
+              title: 'Export Backup (.vdb)',
+              text: 'Choose where to save your backup file'
+            });
+            setVdbStatus({ type: 'success', message: "Backup file (.vdb) exported successfully!" });
+            setTimeout(() => setVdbStatus({ type: null, message: "" }), 4000);
+            return;
+          }
+        } catch (shareErr: any) {
+          if (shareErr.name === 'AbortError') {
+            setVdbStatus({ type: null, message: "" });
+            return;
+          }
+          // On non-abort error, fall through to browser save picker or download fallback
+        }
+      }
+
+      // 3. Web Browser File System Access API (Desktop Chrome/Edge save-picker dialog)
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await (window as any).showSaveFilePicker({
+            suggestedName: fileName,
+            types: [{
+              description: 'VDB Backup File',
+              accept: { 'application/octet-stream': ['.vdb'] }
+            }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          setVdbStatus({ type: 'success', message: "Backup saved to chosen location successfully!" });
+          setTimeout(() => setVdbStatus({ type: null, message: "" }), 4000);
+          return;
+        } catch (pickerErr: any) {
+          if (pickerErr.name === 'AbortError') {
+            setVdbStatus({ type: null, message: "" });
+            return;
+          }
+        }
+      }
+
+      // 4. Standard Web download fallback
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `backup_${new Date().toISOString().slice(0, 10)}.vdb`;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      setVdbStatus({ type: 'success', message: "Backup file (.vdb) exported successfully! Please choose where to save." });
+      setVdbStatus({ type: 'success', message: "Backup file (.vdb) downloaded successfully!" });
       setTimeout(() => setVdbStatus({ type: null, message: "" }), 4000);
     } catch (err: any) {
       setVdbStatus({ type: 'error', message: `Export failed: ${err.message || err}` });
@@ -523,204 +543,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     if (backupFileInputRef.current) {
       backupFileInputRef.current.value = "";
     }
-  };
-
-  const handleGoogleDriveSync = (direction: 'upload' | 'download') => {
-    setIsTopicsMenuOpen(false);
-    if (!isDriveConnected) {
-      setSyncStatus({
-        isSyncing: true,
-        direction,
-        progress: 10,
-        message: "No linked Google Account found. Please set up account synchronization first!"
-      });
-      setTimeout(() => {
-        setSyncStatus({ isSyncing: false, direction: null, progress: 0, message: "" });
-        setShowSyncSetupDialog(true);
-      }, 2500);
-      return;
-    }
-    setSyncStatus({
-      isSyncing: true,
-      direction,
-      progress: 5,
-      message: `Establishing Google OAuth API token...`
-    });
-
-    const steps = [
-      { p: 20, m: "Authenticating client workspace & AppData folder scopes..." },
-      { p: 40, m: direction === 'upload' ? "Packaging local SQLite DB file..." : "Searching Drive AppData files for backup..." },
-      { p: 65, m: direction === 'upload' ? "Uploading binary stream packet chunks..." : "Downloading latest master database backup..." },
-      { p: 85, m: direction === 'upload' ? "Committing transaction log metadata..." : "Restoring dynamic schemas & access history logs..." },
-    ];
-
-    let currentStep = 0;
-    const interval = setInterval(() => {
-      if (currentStep < steps.length) {
-        setSyncStatus(prev => ({
-          ...prev,
-          progress: steps[currentStep].p,
-          message: steps[currentStep].m
-        }));
-        currentStep++;
-      } else {
-        clearInterval(interval);
-        if (onGoogleDriveSync) {
-          onGoogleDriveSync(direction, (details) => {
-            setSyncStatus({
-              isSyncing: true,
-              direction,
-              progress: 100,
-              message: direction === 'upload' ? `Upload completed! ${details}` : `Download completed! Restored all database states.`
-            });
-            setTimeout(() => {
-              setSyncStatus({ isSyncing: false, direction: null, progress: 0, message: "" });
-            }, 3500);
-          });
-        } else {
-          setSyncStatus({
-            isSyncing: true,
-            direction,
-            progress: 100,
-            message: `Synchronization simulated successfully!`
-          });
-          setTimeout(() => {
-            setSyncStatus({ isSyncing: false, direction: null, progress: 0, message: "" });
-          }, 3000);
-        }
-      }
-    }, 450);
-  };
-
-  const handleCreateSharedDb = () => {
-    if (!isDriveConnected) {
-      setSyncStatus({
-        isSyncing: true,
-        direction: 'commit',
-        progress: 25,
-        message: "Authenticating Google Drive account..."
-      });
-      setTimeout(() => {
-        setIsDriveConnected(true);
-        localStorage.setItem("vdb_drive_connected", "true");
-        setDriveEmail("lqluong.2047@gmail.com");
-        localStorage.setItem("vdb_drive_email", "lqluong.2047@gmail.com");
-        finishCreateDb();
-      }, 1000);
-    } else {
-      finishCreateDb();
-    }
-
-    function finishCreateDb() {
-      setSyncStatus({
-        isSyncing: true,
-        direction: 'commit',
-        progress: 60,
-        message: "Creating shared database folder on Google Drive..."
-      });
-      setTimeout(() => {
-        const folderId = "1SharedDB_" + Math.random().toString(36).substring(2, 9).toUpperCase();
-        const newUrl = `https://drive.google.com/drive/folders/${folderId}?usp=sharing`;
-        setSharedDriveLink(newUrl);
-        setIsHostPhone(true);
-        localStorage.setItem("vdb_shared_drive_link", newUrl);
-        localStorage.setItem("vdb_is_host_phone", "true");
-        setSyncStatus({
-          isSyncing: true,
-          direction: 'commit',
-          progress: 100,
-          message: "Shared DB folder created! Share the link with other phones."
-        });
-        setTimeout(() => setSyncStatus({ isSyncing: false, direction: null, progress: 0, message: "" }), 2500);
-      }, 1000);
-    }
-  };
-
-  const handleConnectSharedDb = () => {
-    if (!joinLinkInput.trim()) return;
-    const link = joinLinkInput.trim();
-    setSyncStatus({
-      isSyncing: true,
-      direction: 'refresh',
-      progress: 35,
-      message: "Verifying Google Drive shared folder link..."
-    });
-    setTimeout(() => {
-      setSharedDriveLink(link);
-      setIsHostPhone(false);
-      setJoinLinkInput("");
-      localStorage.setItem("vdb_shared_drive_link", link);
-      localStorage.setItem("vdb_is_host_phone", "false");
-      setSyncStatus({
-        isSyncing: true,
-        direction: 'refresh',
-        progress: 100,
-        message: "Connected to Google Drive Shared DB!"
-      });
-      setTimeout(() => setSyncStatus({ isSyncing: false, direction: null, progress: 0, message: "" }), 2500);
-    }, 1000);
-  };
-
-  const handleCommitChange = () => {
-    if (!sharedDriveLink) return;
-    setSyncStatus({
-      isSyncing: true,
-      direction: 'commit',
-      progress: 15,
-      message: "Connecting to Shared Drive folder..."
-    });
-    const steps = [
-      { p: 40, m: "Serializing local Room SQLite database transactions..." },
-      { p: 75, m: "Uploading data changes to shared Google Drive..." },
-      { p: 95, m: "Reconciling multi-phone synchronization version timestamps..." },
-    ];
-    let cur = 0;
-    const timer = setInterval(() => {
-      if (cur < steps.length) {
-        setSyncStatus(prev => ({ ...prev, progress: steps[cur].p, message: steps[cur].m }));
-        cur++;
-      } else {
-        clearInterval(timer);
-        setSyncStatus({
-          isSyncing: true,
-          direction: 'commit',
-          progress: 100,
-          message: "Commit change successful! Synced to shared Google Drive database."
-        });
-        setTimeout(() => setSyncStatus({ isSyncing: false, direction: null, progress: 0, message: "" }), 2500);
-      }
-    }, 600);
-  };
-
-  const handleRefreshData = () => {
-    if (!sharedDriveLink) return;
-    setSyncStatus({
-      isSyncing: true,
-      direction: 'refresh',
-      progress: 15,
-      message: "Querying shared Google Drive folder link..."
-    });
-    const steps = [
-      { p: 40, m: "Downloading latest master database snapshot..." },
-      { p: 75, m: "Reconciling foreign language topics and articles..." },
-      { p: 95, m: "Updating local Room virtual database state..." },
-    ];
-    let cur = 0;
-    const timer = setInterval(() => {
-      if (cur < steps.length) {
-        setSyncStatus(prev => ({ ...prev, progress: steps[cur].p, message: steps[cur].m }));
-        cur++;
-      } else {
-        clearInterval(timer);
-        setSyncStatus({
-          isSyncing: true,
-          direction: 'refresh',
-          progress: 100,
-          message: "Refresh data successful! Phone database updated from Google Drive."
-        });
-        setTimeout(() => setSyncStatus({ isSyncing: false, direction: null, progress: 0, message: "" }), 2500);
-      }
-    }, 600);
   };
 
   // Topics list top bar menu and modals
@@ -3366,35 +3188,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
                 {/* SCREEN CONTENT AREA */}
                 <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
-                  {/* Google Drive / VDB Sync Status Overlay */}
-                  {syncStatus.isSyncing && (
-                    <div className="absolute inset-x-0 inset-y-0 bg-slate-900/85 backdrop-blur-xs flex flex-col items-center justify-center text-center p-6 z-50">
-                      <div className="bg-white rounded-2xl p-6 shadow-2xl max-w-xs w-full space-y-4 border border-slate-100 flex flex-col items-center">
-                        <div className="relative flex items-center justify-center">
-                          <div className="w-12 h-12 rounded-full border-4 border-indigo-150 border-t-indigo-600 animate-spin" />
-                          <Cloud className="w-5 h-5 text-indigo-600 absolute" />
-                        </div>
-                        <div className="space-y-1.5 w-full">
-                          <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest">
-                            {syncStatus.direction === 'upload' ? 'Upload to Drive' :
-                             syncStatus.direction === 'download' ? 'Download from Drive' :
-                             syncStatus.direction === 'commit' ? 'Commit Change' :
-                             syncStatus.direction === 'refresh' ? 'Refresh Data' : 'Drive Sync'}
-                          </h4>
-                          <p className="text-[10.5px] text-slate-500 font-semibold leading-normal break-words">
-                            {syncStatus.message}
-                          </p>
-                        </div>
-                        {/* Progress Bar */}
-                        <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden font-mono">
-                          <div 
-                            className="bg-indigo-600 h-1.5 rounded-full transition-all duration-300"
-                            style={{ width: `${syncStatus.progress}%` }}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
+
 
                   {vdbStatus.type && (
                     <div className="absolute inset-x-4 top-4 bg-slate-950/95 backdrop-blur-xs text-white p-3 rounded-xl shadow-lg border border-white/10 z-50 flex items-center space-x-2">
@@ -5239,165 +5033,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           </button>
                         </div>
                       </div>
-
-                      {/* GOOGLE DRIVE SYNC */}
-                      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-3xs space-y-3">
-                        <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
-                          <Cloud className="w-4 h-4 text-emerald-600 shrink-0" />
-                          <span className="text-[11px] font-extrabold text-slate-800 tracking-wider uppercase">
-                            Google Drive Sync
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Sync your data securely to the cloud. Link your Google account to enable auto-backup or manually trigger uploads and downloads.
-                        </p>
-                        <div className="space-y-2 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => setShowSyncSetupDialog(true)}
-                            className="w-full flex items-center justify-center space-x-2 py-2 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs transition-colors cursor-pointer"
-                            title="Link your Google Account for cloud storage backups"
-                          >
-                            <Cloud className="w-3.5 h-3.5 shrink-0" />
-                            <span>Account Synchronization Settings</span>
-                          </button>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleGoogleDriveSync('upload')}
-                              className="flex items-center justify-center space-x-1.5 py-2 px-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[11px] transition-colors cursor-pointer"
-                              title="Manually upload data from phone into secure Google Drive storage"
-                            >
-                              <CloudUpload className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span>Manual Upload</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleGoogleDriveSync('download')}
-                              className="flex items-center justify-center space-x-1.5 py-2 px-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-[11px] transition-colors cursor-pointer"
-                              title="Manually download data from Google Drive and restore local phone state"
-                            >
-                              <CloudDownload className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                              <span>Manual Download</span>
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* SHARED GOOGLE DRIVE LINK SYNC */}
-                      <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-3xs space-y-3">
-                        <div className="flex items-center space-x-2 border-b border-slate-100 pb-2">
-                          <Share2 className="w-4 h-4 text-indigo-600 shrink-0" />
-                          <span className="text-[11px] font-extrabold text-slate-800 tracking-wider uppercase">
-                            Shared Drive Link Sync
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-500 leading-normal">
-                          Run consistent database data across multiple phones. Phone A logs in to create a shared database link; Phones B, C, D connect via that link.
-                        </p>
-
-                        {sharedDriveLink ? (
-                          <div className="space-y-2.5 pt-1">
-                            <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-xl p-3 space-y-2">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-1.5 text-[11px] font-bold text-indigo-950">
-                                  <Check className="w-4 h-4 text-indigo-600 shrink-0" />
-                                  <span>Connected ({isHostPhone ? "Host Phone A" : "Client Phone"})</span>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setSharedDriveLink("");
-                                    localStorage.removeItem("vdb_shared_drive_link");
-                                    localStorage.removeItem("vdb_is_host_phone");
-                                  }}
-                                  className="text-[10px] font-bold text-red-600 hover:text-red-700 underline cursor-pointer"
-                                >
-                                  Disconnect
-                                </button>
-                              </div>
-                              <div className="flex items-center space-x-1.5 bg-white border border-indigo-150 rounded-lg p-1.5 px-2">
-                                <Link2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                <span className="font-mono text-[9.5px] text-slate-600 truncate select-all flex-1">{sharedDriveLink}</span>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    navigator.clipboard?.writeText(sharedDriveLink);
-                                    setSharedLinkCopied(true);
-                                    setTimeout(() => setSharedLinkCopied(false), 2000);
-                                  }}
-                                  className="py-1 px-2 bg-slate-50 hover:bg-slate-100 rounded text-slate-700 cursor-pointer text-[10px] font-bold shrink-0 border border-slate-200/80"
-                                >
-                                  {sharedLinkCopied ? "Copied!" : "Copy"}
-                                </button>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-2">
-                              <button
-                                type="button"
-                                onClick={handleCommitChange}
-                                className="flex items-center justify-center space-x-1.5 py-2.5 px-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-sm active:scale-95"
-                                title="Commit local data changes to shared Google Drive folder"
-                              >
-                                <CloudUpload className="w-3.5 h-3.5 shrink-0" />
-                                <span>Commit change</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={handleRefreshData}
-                                className="flex items-center justify-center space-x-1.5 py-2.5 px-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs transition-colors cursor-pointer shadow-sm active:scale-95"
-                                title="Refresh data from Google Drive shared link to phone"
-                              >
-                                <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-                                <span>Refresh data</span>
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="space-y-2.5 pt-1">
-                            {/* Role A: Host Phone */}
-                            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 space-y-2">
-                              <span className="block text-[9.5px] font-extrabold text-slate-700 uppercase tracking-wider">
-                                Phone A (Create &amp; Share Link)
-                              </span>
-                              <button
-                                type="button"
-                                onClick={handleCreateSharedDb}
-                                className="w-full flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] transition-colors cursor-pointer shadow-2xs"
-                              >
-                                <Share2 className="w-3.5 h-3.5 shrink-0" />
-                                <span>Create DB Folder &amp; Share Link</span>
-                              </button>
-                            </div>
-
-                            {/* Role B: Joiner Phone */}
-                            <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-2.5 space-y-2">
-                              <span className="block text-[9.5px] font-extrabold text-slate-700 uppercase tracking-wider">
-                                Phones B, C, D... (Connect Link)
-                              </span>
-                              <div className="flex space-x-1.5">
-                                <input
-                                  type="text"
-                                  placeholder="Paste shared Drive link..."
-                                  value={joinLinkInput}
-                                  onChange={(e) => setJoinLinkInput(e.target.value)}
-                                  className="flex-1 bg-white border border-slate-200 rounded-xl px-2.5 py-1.5 text-[11px] text-slate-800 placeholder:text-slate-400 focus:outline-hidden focus:border-indigo-500 font-mono"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={handleConnectSharedDb}
-                                  disabled={!joinLinkInput.trim()}
-                                  className="flex items-center justify-center py-1.5 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-[11px] transition-colors cursor-pointer shrink-0"
-                                >
-                                  <span>Connect</span>
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
                     </div>
                   )}
 
@@ -5612,86 +5247,7 @@ Nein, Sie müssen in Nürnberg umsteigen.{"\n"}
                         </div>
                       </div>
                     </div>
-                  )}
-
-                  {/* Google Drive Sync Setup Dialog Overlay */}
-                  {showSyncSetupDialog && (
-                    <div
-                      id="sync-setup-dialog-overlay"
-                      className="absolute inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-6 backdrop-blur-xs"
-                    >
-                      <div
-                        id="sync-setup-dialog"
-                        className="bg-white rounded-3xl p-5 shadow-xl border border-slate-200 w-full max-w-[280px] space-y-4"
-                      >
-                        <div className="space-y-2 text-left">
-                          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                            <Cloud className="w-5 h-5 text-emerald-500 shrink-0" />
-                            Account Sync Setup
-                          </h3>
-                          <p className="text-[11px] text-slate-500 leading-normal">
-                            Enable serverless replication to securely backup and reconcile foreign language topics and subtitle catalogs across your devices.
-                          </p>
-
-                          {isDriveConnected ? (
-                            <div className="bg-emerald-50 border border-emerald-150 rounded-xl p-3 space-y-1.5 mt-2">
-                              <div className="flex items-center space-x-1 text-[11px] text-emerald-850 font-bold">
-                                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
-                                <span>Connected Successfully</span>
-                              </div>
-                              <p className="text-[10px] text-slate-500 font-medium leading-tight">
-                                Active sync account: <br />
-                                <span className="font-mono text-indigo-650 font-semibold select-all break-all text-[9.5px]">{driveEmail}</span>
-                              </p>
-                              <div className="pt-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setIsDriveConnected(false);
-                                    localStorage.removeItem("vdb_drive_connected");
-                                    localStorage.removeItem("vdb_drive_email");
-                                    logout();
-                                  }}
-                                  className="w-full text-center text-[10px] py-1 text-red-650 hover:bg-red-50 hover:text-red-750 font-bold border border-red-200 rounded-lg transition-colors cursor-pointer"
-                                >
-                                  Disconnect Account
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="mt-3 space-y-2.5">
-                              <span className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                                Provider Credentials
-                              </span>
-                              <button
-                                type="button"
-                                onClick={handleGoogleSignIn}
-                                className="w-full flex items-center justify-center space-x-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 hover:border-slate-300 py-2 px-3 rounded-xl transition-all cursor-pointer shadow-3xs"
-                              >
-                                <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4 shrink-0">
-                                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                                </svg>
-                                <span className="text-[11px] font-bold text-slate-700">Sign in with Google</span>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-end pt-1">
-                          <button
-                            type="button"
-                            onClick={() => setShowSyncSetupDialog(false)}
-                            className="px-4 py-1.5 rounded-xl bg-slate-50 hover:bg-slate-100 text-xs font-bold transition-all cursor-pointer border border-slate-200/65 shadow-xs"
-                            style={{ color: '#898585' }}
-                          >
-                            Close
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                    )}
 
                   {/* Cover Image Cropping Overlay */}
                   {rawUploadedImage && (

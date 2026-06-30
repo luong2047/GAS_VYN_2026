@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Topic, Article, AccessLog, SubtitleSegment, SyncLog, VocabularyItem } from './types';
 import { PhoneSimulator } from './components/PhoneSimulator';
-import { getAccessToken } from './lib/auth';
-import { uploadBackup, downloadBackup, getBackupFileId } from './lib/driveService';
 
 // Local Javascript parser mimicking the Kotlin SubtitleParser.kt code
 export const parseSubtitles = (content: string): SubtitleSegment[] => {
@@ -387,72 +385,6 @@ export default function App() {
     setAccessLogs([]);
   };
 
-  // Triggers real Google Drive integration sync or simulation fallback
-  const handleGoogleDriveSync = async (direction: 'upload' | 'download', onComplete: (logs: string) => void) => {
-    const syncId = Math.random().toString(36).substr(2, 9);
-    try {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        throw new Error("No active Google OAuth access token. Please sign in with your Google account in settings.");
-      }
-
-      if (direction === 'upload') {
-        const payload = {
-          topics: topics || [],
-          articles: articles || [],
-          accessLogs: accessLogs || []
-        };
-        await uploadBackup(accessToken, payload);
-        const details = `Committed active backup of [${topics.length} topics, ${articles.length} articles, ${accessLogs.length} logs] to secure AppData storage folder. App ID com.example.langapp`;
-        const newSyncLog: SyncLog = {
-          id: syncId,
-          direction: 'upload',
-          status: 'success',
-          timestamp: formatTimestamp(new Date()),
-          details
-        };
-        setSyncHistory(prev => [newSyncLog, ...prev]);
-        onComplete(details);
-      } else {
-        const fileId = await getBackupFileId(accessToken);
-        if (!fileId) {
-          throw new Error("No backup file found in Google Drive AppData folder. Upload first!");
-        }
-        const restored = await downloadBackup(accessToken, fileId);
-        if (!restored || !Array.isArray(restored.topics)) {
-          throw new Error("Downloaded backup container is corrupt or empty.");
-        }
-
-        setTopics(restored.topics);
-        setArticles(restored.articles);
-        setAccessLogs(restored.accessLogs || []);
-
-        const details = `Downloaded backup successfully. Extracted [${restored.topics.length} topics, ${restored.articles.length} articles, ${restored.accessLogs.length} logs] from secure cloud.`;
-        const newSyncLog: SyncLog = {
-          id: syncId,
-          direction: 'download',
-          status: 'success',
-          timestamp: formatTimestamp(new Date()),
-          details
-        };
-        setSyncHistory(prev => [newSyncLog, ...prev]);
-        onComplete(details);
-      }
-    } catch (error: any) {
-      console.warn("Google Drive Sync error - providing details in history:", error);
-      const details = error.message || "Failed to reach Google Drive API endpoints.";
-      const newSyncLog: SyncLog = {
-        id: syncId,
-        direction,
-        status: 'failed',
-        timestamp: formatTimestamp(new Date()),
-        details: `Sync Error: ${details}`
-      };
-      setSyncHistory(prev => [newSyncLog, ...prev]);
-      onComplete(`Error: ${details}`);
-    }
-  };
-
   const handleImportData = (newTopics: Topic[], newArticles: Article[], newAccessLogs: AccessLog[]) => {
     setTopics(newTopics);
     setArticles(newArticles);
@@ -476,7 +408,6 @@ export default function App() {
         onUpdateTopic={handleUpdateTopic}
         onDeleteTopic={handleDeleteTopic}
         onImportData={handleImportData}
-        onGoogleDriveSync={handleGoogleDriveSync}
       />
     </div>
   );
