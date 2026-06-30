@@ -751,6 +751,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const [isEditVocabularyActive, setIsEditVocabularyActive] = useState<boolean>(false);
   const [isVocabMenuOpen, setIsVocabMenuOpen] = useState(false);
   const [isInsertExpressionExpanded, setIsInsertExpressionExpanded] = useState(true);
+  const [showFloatingAddVocab, setShowFloatingAddVocab] = useState(false);
+  const [vocabAddedToast, setVocabAddedToast] = useState(false);
 
   // Swipe detection refs for touch/mouse gestures
   const touchStartXRef = useRef<number | null>(null);
@@ -879,6 +881,42 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     setNewWord("");
     setNewDefinition("");
     setNewExample("");
+  };
+
+  const handleAddVocabFloating = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedArticle || !newWord.trim() || !newDefinition.trim()) return;
+
+    const newItem: VocabularyItem = {
+      id: Math.random().toString(36).substr(2, 9),
+      word: newWord.trim(),
+      definition: newDefinition.trim(),
+      exampleSentence: newExample.trim() || undefined,
+    };
+
+    const currentVocab = selectedArticle.vocabulary || [];
+    const updatedVocab = [...currentVocab, newItem];
+
+    // Update parent
+    if (onUpdateVocabulary) {
+      onUpdateVocabulary(selectedArticle.id, updatedVocab);
+    }
+    // Update local state
+    setSelectedArticle((prev) =>
+      prev ? { ...prev, vocabulary: updatedVocab } : null,
+    );
+
+    // Clear form inputs
+    setNewWord("");
+    setNewDefinition("");
+    setNewExample("");
+
+    // Show success toast and close floating form after a delay
+    setVocabAddedToast(true);
+    setTimeout(() => {
+      setVocabAddedToast(false);
+      setShowFloatingAddVocab(false);
+    }, 1500);
   };
 
   const handleDeleteVocab = (vocabId: string) => {
@@ -2803,6 +2841,18 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                   {currentScreen === "article-detail" && selectedArticle && (
                     <div className="relative flex items-center">
                       <button
+                        onClick={() => setShowFloatingAddVocab(!showFloatingAddVocab)}
+                        className={`p-1 hover:bg-slate-100 rounded-lg transition-all cursor-pointer mr-0.5 flex items-center justify-center ${
+                          showFloatingAddVocab ? "bg-indigo-50 border border-indigo-200" : "border border-transparent"
+                        }`}
+                        title="Add Vocabulary"
+                      >
+                        <span className="w-6 h-6 flex items-center justify-center font-sans font-extrabold text-[13px] leading-none text-indigo-600 bg-indigo-50/85 rounded-full border border-indigo-200 shadow-3xs select-none">
+                          ☪
+                        </span>
+                      </button>
+
+                      <button
                         onClick={() => setIsMenuOpen(!isMenuOpen)}
                         className="p-1.5 hover:bg-slate-100 text-slate-650 rounded-full transition-colors cursor-pointer"
                         title="Article options (Zoom, Save, TTS Voice)"
@@ -3699,7 +3749,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: 15 }}
                         transition={{ duration: 0.18 }}
-                        className="flex-1 flex flex-col h-full bg-slate-50 select-none"
+                        className="flex-1 flex flex-col h-full bg-slate-50 select-none relative"
                         onTouchStart={handleTouchStart}
                         onTouchEnd={handleTouchEnd}
                         onMouseDown={handleMouseDown}
@@ -3901,6 +3951,121 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               {formatTime(getAudioDuration())}
                             </span>
                           </div>
+                        </div>
+                      )}
+
+                      {/* Floating Add Vocabulary Form */}
+                      {showFloatingAddVocab && (
+                        <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-xs z-30 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowFloatingAddVocab(false)}>
+                          <form
+                            onSubmit={handleAddVocabFloating}
+                            className="bg-white rounded-2xl p-4 shadow-xl border border-indigo-100 w-full max-w-[280px] space-y-3.5 animate-in zoom-in-95 duration-150"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                              <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                                <span className="w-5.5 h-5.5 flex items-center justify-center font-sans font-black text-[12px] text-indigo-600 border border-indigo-200 bg-indigo-50/60 rounded-full">
+                                  ☪
+                                </span>
+                                Add Vocabulary
+                              </h3>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowFloatingAddVocab(false);
+                                  setNewWord("");
+                                  setNewDefinition("");
+                                  setNewExample("");
+                                }}
+                                className="p-1 hover:bg-slate-100 rounded-full text-slate-400 hover:text-slate-650 transition-colors cursor-pointer"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+
+                            {vocabAddedToast ? (
+                              <div className="py-8 flex flex-col items-center justify-center space-y-2 text-center animate-in fade-in duration-150">
+                                <div className="w-10 h-10 rounded-full bg-emerald-50 border border-emerald-200 flex items-center justify-center text-emerald-600">
+                                  <Check className="w-5 h-5" />
+                                </div>
+                                <p className="text-xs font-bold text-slate-800">
+                                  Vocabulary Added!
+                                </p>
+                                <p className="text-[10px] text-slate-400">
+                                  Saved to article's word list.
+                                </p>
+                              </div>
+                            ) : (
+                              <>
+                                {/* Inputs */}
+                                <div className="space-y-2 text-left">
+                                  <div className="space-y-0.5">
+                                    <label className="block text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">
+                                      Word / Expression
+                                    </label>
+                                    <input
+                                      type="text"
+                                      required
+                                      placeholder="Enter word (e.g. ubiquitous)"
+                                      value={newWord}
+                                      onChange={(e) => setNewWord(e.target.value)}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none transition-all"
+                                    />
+                                  </div>
+
+                                  <div className="space-y-0.5">
+                                    <label className="block text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">
+                                      Definition / Translation
+                                    </label>
+                                    <textarea
+                                      required
+                                      rows={2}
+                                      placeholder="Enter meaning or translation"
+                                      value={newDefinition}
+                                      onChange={(e) => setNewDefinition(e.target.value)}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none transition-all resize-none"
+                                    />
+                                  </div>
+
+                                  <div className="space-y-0.5">
+                                    <label className="block text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">
+                                      Example Sentence (Optional)
+                                    </label>
+                                    <textarea
+                                      rows={2}
+                                      placeholder="Enter example context"
+                                      value={newExample}
+                                      onChange={(e) => setNewExample(e.target.value)}
+                                      className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none transition-all resize-none"
+                                    />
+                                  </div>
+                                </div>
+
+                                {/* Form Actions */}
+                                <div className="flex items-center space-x-2 pt-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setShowFloatingAddVocab(false);
+                                      setNewWord("");
+                                      setNewDefinition("");
+                                      setNewExample("");
+                                    }}
+                                    className="flex-1 py-1.5 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 font-bold text-xs transition-colors cursor-pointer text-center"
+                                  >
+                                    Cancel
+                                  </button>
+                                  <button
+                                    type="submit"
+                                    disabled={!newWord.trim() || !newDefinition.trim()}
+                                    className="flex-1 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs transition-colors cursor-pointer text-center shadow-xs"
+                                  >
+                                    Add Word
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </form>
                         </div>
                       )}
                     </motion.div>
