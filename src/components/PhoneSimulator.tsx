@@ -361,6 +361,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     | "settings"
     | "exited"
   >("topics");
+  const currentScreenRef = useRef(currentScreen);
+  currentScreenRef.current = currentScreen;
   const [isNoteEditMode, setIsNoteEditMode] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [cameFromSearch, setCameFromSearch] = useState(false);
@@ -379,6 +381,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const backupFileInputRef = useRef<HTMLInputElement>(null);
   const [vdbStatus, setVdbStatus] = useState<{ type: 'success' | 'error' | 'loading' | null, message: string }>({ type: null, message: "" });
   const articleScrollMapRef = useRef<Record<number, number>>({});
+  const isRestoringScrollRef = useRef<boolean>(false);
 
   const compressData = async (text: string): Promise<Blob> => {
     if (typeof CompressionStream !== "undefined") {
@@ -405,8 +408,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     return await blob.text();
   };
 
-  const handleExportVdb = async () => {
+  const handleExportVdb = async (customFileName?: string) => {
     setIsTopicsMenuOpen(false);
+    setShowExportModal(false);
     setVdbStatus({ type: 'loading', message: "Packaging application data..." });
     try {
       const dataToExport = {
@@ -416,7 +420,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       };
       const jsonString = JSON.stringify(dataToExport);
       const blob = await compressData(jsonString);
-      const fileName = `backup_${new Date().toISOString().slice(0, 10)}.vdb`;
+      
+      let fileName = customFileName?.trim() || `backup_${new Date().toISOString().slice(0, 10)}.vdb`;
+      if (!fileName.toLowerCase().endsWith('.vdb') && !fileName.toLowerCase().endsWith('.json')) {
+        fileName += '.vdb';
+      }
 
       // 1. Capacitor Native phone app (Android/iOS)
       if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
@@ -446,30 +454,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         return;
       }
 
-      // 2. Web Share API (extremely effective on real phones in mobile browsers like Safari/Chrome to prompt location selection / native save sheet)
-      if (navigator.share) {
-        try {
-          const file = new File([blob], fileName, { type: 'application/octet-stream' });
-          if (navigator.canShare && navigator.canShare({ files: [file] })) {
-            await navigator.share({
-              files: [file],
-              title: 'Export Backup (.vdb)',
-              text: 'Choose where to save your backup file'
-            });
-            setVdbStatus({ type: 'success', message: "Backup file (.vdb) exported successfully!" });
-            setTimeout(() => setVdbStatus({ type: null, message: "" }), 4000);
-            return;
-          }
-        } catch (shareErr: any) {
-          if (shareErr.name === 'AbortError') {
-            setVdbStatus({ type: null, message: "" });
-            return;
-          }
-          // On non-abort error, fall through to browser save picker or download fallback
-        }
-      }
-
-      // 3. Web Browser File System Access API (Desktop Chrome/Edge save-picker dialog)
+      // 2. Web Browser File System Access API (Desktop Chrome/Edge save-picker dialog)
       if ('showSaveFilePicker' in window) {
         try {
           const handle = await (window as any).showSaveFilePicker({
@@ -493,7 +478,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         }
       }
 
-      // 4. Standard Web download fallback
+      // 3. Standard Web download fallback
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -549,6 +534,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const [isTopicsMenuOpen, setIsTopicsMenuOpen] = useState(false);
   const [showIntroDialog, setShowIntroDialog] = useState(false);
   const [showExitDialog, setShowExitDialog] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFileName, setExportFileName] = useState("");
 
   // Topic Management State
   const [topicManageMode, setTopicManageMode] = useState<
@@ -2013,10 +2000,39 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     };
   }, [currentScreen, selectedArticle]);
 
+  // Lock scroll saving briefly during screen transitions, article changes, or floating-form toggles
+  React.useEffect(() => {
+    isRestoringScrollRef.current = true;
+    const timer = setTimeout(() => {
+      isRestoringScrollRef.current = false;
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [currentScreen, selectedArticle, showFloatingAddVocab]);
+
   React.useLayoutEffect(() => {
     if (currentScreen === "article-detail" && selectedArticle && listContainerRef.current) {
       const savedTop = articleScrollMapRef.current[selectedArticle.id] || 0;
+      
+      // Perform synchronous scroll restoration
       listContainerRef.current.scrollTop = savedTop;
+
+      // Handle any potential lazy image loads or async rendering/layout calculation delays:
+      const timer1 = setTimeout(() => {
+        if (listContainerRef.current) {
+          listContainerRef.current.scrollTop = savedTop;
+        }
+      }, 50);
+
+      const timer2 = setTimeout(() => {
+        if (listContainerRef.current) {
+          listContainerRef.current.scrollTop = savedTop;
+        }
+      }, 150);
+
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+      };
     }
   }, [currentScreen, selectedArticle]);
 
@@ -3759,8 +3775,15 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         <div
                           ref={listContainerRef}
                           onScroll={(e) => {
-                            if (selectedArticle) {
-                              articleScrollMapRef.current[selectedArticle.id] = e.currentTarget.scrollTop;
+                            if (selectedArticle && !isRestoringScrollRef.current && currentScreenRef.current === "article-detail") {
+                              const scrollTopVal = e.currentTarget.scrollTop;
+                              const scrollHeightVal = e.currentTarget.scrollHeight;
+                              const clientHeightVal = e.currentTarget.clientHeight;
+                              
+                              // Only save scroll positions if the container is genuinely laid out and visible
+                              if (scrollHeightVal > 0 && clientHeightVal > 0) {
+                                articleScrollMapRef.current[selectedArticle.id] = scrollTopVal;
+                              }
                             }
                           }}
                           className="flex-1 px-2 py-4 overflow-y-auto space-y-4 scrollbar-thin scrollbar-thumb-slate-200"
@@ -5180,7 +5203,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         <div className="grid grid-cols-2 gap-2 pt-1">
                           <button
                             type="button"
-                            onClick={handleExportVdb}
+                            onClick={() => {
+                              const dateStr = new Date().toISOString().slice(0, 10);
+                              setExportFileName(`backup_${dateStr}.vdb`);
+                              setShowExportModal(true);
+                            }}
                             className="flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs transition-colors cursor-pointer"
                             title="Backup database to a .vdb compressed file and save locally"
                           >
@@ -5190,11 +5217,65 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                           <button
                             type="button"
                             onClick={() => backupFileInputRef.current?.click()}
-                            className="flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs transition-colors cursor-pointer"
+                            className="flex items-center justify-center space-x-1.5 py-2 px-3 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-[#4338ca] text-indigo-700 font-bold text-xs transition-colors cursor-pointer"
                             title="Restore database by importing a .vdb backup file"
                           >
                             <Download className="w-3.5 h-3.5 shrink-0" />
                             <span>Import Backup</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Export Backup Filename Input Modal */}
+                  {showExportModal && (
+                    <div
+                      id="export-backup-overlay"
+                      className="absolute inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-6 backdrop-blur-xs animate-in fade-in duration-200"
+                      onClick={() => setShowExportModal(false)}
+                    >
+                      <div
+                        id="export-backup-dialog"
+                        className="bg-white rounded-3xl p-5 shadow-xl border border-slate-200 w-full max-w-[280px] space-y-4 animate-in zoom-in-95 duration-150"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="space-y-2 text-left">
+                          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                            <Upload className="w-5 h-5 text-indigo-500 shrink-0" />
+                            Export Backup
+                          </h3>
+                          <p className="text-[11px] text-slate-500 leading-normal">
+                            Specify the name for your <code>.vdb</code> backup file. Your browser will prompt you to choose the download folder or save location.
+                          </p>
+                          <div className="space-y-1">
+                            <label className="block text-[9px] font-extrabold text-slate-400 uppercase tracking-wider">
+                              Backup File Name
+                            </label>
+                            <input
+                              type="text"
+                              value={exportFileName}
+                              onChange={(e) => setExportFileName(e.target.value)}
+                              placeholder="backup_name.vdb"
+                              className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl px-2.5 py-1.5 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none transition-all"
+                            />
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-end space-x-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setShowExportModal(false)}
+                            className="px-3 py-2 rounded-xl hover:bg-slate-100 text-slate-650 text-xs font-bold transition-all cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleExportVdb(exportFileName)}
+                            disabled={!exportFileName.trim()}
+                            className="px-3 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold transition-all cursor-pointer shadow-sm shadow-indigo-150"
+                          >
+                            Export
                           </button>
                         </div>
                       </div>
@@ -5506,7 +5587,7 @@ Nein, Sie müssen in Nürnberg umsteigen.{"\n"}
                     type="file"
                     ref={backupFileInputRef}
                     onChange={handleImportVdb}
-                    accept=".vdb,.json"
+                    accept=".vdb,.json,application/octet-stream,text/plain,application/json,*/*"
                     className="hidden"
                   />
                 </div>
