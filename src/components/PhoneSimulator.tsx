@@ -48,6 +48,8 @@ import {
   Link2,
   RefreshCw,
   Copy,
+  Flame,
+  Home,
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { TextToSpeech } from "@capacitor-community/text-to-speech";
@@ -333,6 +335,53 @@ const CustomDatePicker: React.FC<{
   );
 };
 
+const calculateStreak = (studyTimes: Record<string, number>): number => {
+  if (!studyTimes || Object.keys(studyTimes).length === 0) return 0;
+  let streak = 0;
+  const d = new Date();
+  
+  // Check if there was study today or yesterday to continue the streak
+  const todayStr = d.toISOString().slice(0, 10);
+  
+  d.setDate(d.getDate() - 1);
+  const yesterdayStr = d.toISOString().slice(0, 10);
+  
+  const hasStudiedToday = (studyTimes[todayStr] || 0) > 0;
+  const hasStudiedYesterday = (studyTimes[yesterdayStr] || 0) > 0;
+  
+  if (!hasStudiedToday && !hasStudiedYesterday) {
+    return 0;
+  }
+  
+  // Count backwards starting from today or yesterday
+  let checkDate = new Date();
+  if (!hasStudiedToday) {
+    checkDate.setDate(checkDate.getDate() - 1);
+  }
+  
+  while (true) {
+    const checkStr = checkDate.toISOString().slice(0, 10);
+    if ((studyTimes[checkStr] || 0) > 0) {
+      streak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    } else {
+      break;
+    }
+  }
+  return streak;
+};
+
+const getFormattedDateStrings = () => {
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+  
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+  
+  return { today: todayStr, yesterday: yesterdayStr };
+};
+
 export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   topics,
   articles,
@@ -350,6 +399,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   onImportData,
 }) => {
   const [currentScreen, setCurrentScreen] = useState<
+    | "dashboard"
     | "topics"
     | "articles"
     | "article-detail"
@@ -359,13 +409,15 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     | "topic-management"
     | "search-articles"
     | "settings"
+    | "vocab-compilation"
     | "exited"
-  >("topics");
+  >("dashboard");
   const currentScreenRef = useRef(currentScreen);
   currentScreenRef.current = currentScreen;
   const [isNoteEditMode, setIsNoteEditMode] = useState(false);
   const [selectedTopic, setSelectedTopic] = useState<Topic | null>(null);
   const [cameFromSearch, setCameFromSearch] = useState(false);
+  const [vocabCompOrigin, setVocabCompOrigin] = useState<"dashboard" | "topics">("dashboard");
 
   // Splash Screen State
   const [showSplash, setShowSplash] = useState<boolean>(true);
@@ -381,6 +433,52 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   useEffect(() => {
     prevScreenRef.current = currentScreen;
   }, [currentScreen]);
+
+  // Study times state
+  const [studyTimes, setStudyTimes] = useState<Record<string, number>>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("vyn_study_times");
+      if (saved) {
+        try { return JSON.parse(saved); } catch (e) {}
+      }
+    }
+    return {};
+  });
+
+  // Track study time active seconds
+  useEffect(() => {
+    if (showSplash) return;
+    const interval = setInterval(() => {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      setStudyTimes(prev => {
+        const next = {
+          ...prev,
+          [todayStr]: (prev[todayStr] || 0) + 1
+        };
+        localStorage.setItem("vyn_study_times", JSON.stringify(next));
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [showSplash]);
+
+  const [vocabDates, setVocabDates] = useState<Record<string, string>>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("vocab_creation_dates");
+      if (saved) {
+        try { return JSON.parse(saved); } catch (e) {}
+      }
+    }
+    return {};
+  });
+
+  const updateVocabDate = (id: string, dateStr: string) => {
+    setVocabDates(prev => {
+      const next = { ...prev, [id]: dateStr };
+      localStorage.setItem("vocab_creation_dates", JSON.stringify(next));
+      return next;
+    });
+  };
 
   const lastLoadedArticleIdRef = useRef<number | null>(null);
   const lastLoadedArticleContentRef = useRef<string | null>(null);
@@ -557,6 +655,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   // Article Search State
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [vocabLookupQuery, setVocabLookupQuery] = useState("");
   const [searchTimeRange, setSearchTimeRange] = useState<
     "all" | "today" | "yesterday" | "this_week" | "this_month" | "this_year" | "marked"
   >("all");
@@ -749,6 +848,66 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const [showFloatingAddVocab, setShowFloatingAddVocab] = useState(false);
   const [vocabAddedToast, setVocabAddedToast] = useState(false);
 
+  const getMostRecentArticle = (): Article | null => {
+    if (!articles || articles.length === 0) return null;
+    return [...articles].sort((a, b) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return timeB - timeA;
+    })[0];
+  };
+
+  const countVocabsCreatedOn = (dateStr: string): number => {
+    let count = 0;
+    articles.forEach(article => {
+      (article.vocabulary || []).forEach(vocab => {
+        const vocabDate = vocabDates[vocab.id] || article.createdAt;
+        if (vocabDate && vocabDate.startsWith(dateStr)) {
+          count++;
+        }
+      });
+    });
+    return count;
+  };
+
+  const formatStudyTime = (totalSeconds: number): string => {
+    if (!totalSeconds || totalSeconds < 1) return "0 minutes";
+    if (totalSeconds < 60) return "1 minute";
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    if (hours > 0) {
+      const hrText = `${hours} hour${hours > 1 ? "s" : ""}`;
+      const minText = minutes > 0 ? ` ${minutes} minute${minutes !== 1 ? "s" : ""}` : "";
+      return `${hrText}${minText}`;
+    }
+    return `${minutes} minute${minutes !== 1 ? "s" : ""}`;
+  };
+
+  const getPast15DaysData = () => {
+    const list = [];
+    const now = new Date();
+    for (let i = 14; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(now.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const studySecs = studyTimes[dateStr] || 0;
+      const mins = Math.round(studySecs / 60);
+      const label = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const dayName = d.toLocaleDateString(undefined, { weekday: 'narrow' });
+      list.push({ dateStr, mins, label, dayName, isToday: i === 0 });
+    }
+    return list;
+  };
+
+  const handleViewVocabArticle = (article: Article) => {
+    setSelectedArticle(article);
+    const sourceTopic = topics.find(t => t.id === article.topicId);
+    setSelectedTopic(sourceTopic || null);
+    setCameFromSearch(false);
+    setCurrentScreen("article-detail");
+    onOpenArticle(article.id);
+  };
+
   // Swipe detection refs for touch/mouse gestures
   const touchStartXRef = useRef<number | null>(null);
   const touchStartYRef = useRef<number | null>(null);
@@ -860,6 +1019,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       exampleSentence: newExample.trim() || undefined,
     };
 
+    updateVocabDate(newItem.id, new Date().toISOString());
+
     const currentVocab = selectedArticle.vocabulary || [];
     const updatedVocab = [...currentVocab, newItem];
 
@@ -888,6 +1049,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       definition: newDefinition.trim(),
       exampleSentence: newExample.trim() || undefined,
     };
+
+    updateVocabDate(newItem.id, new Date().toISOString());
 
     const currentVocab = selectedArticle.vocabulary || [];
     const updatedVocab = [...currentVocab, newItem];
@@ -2644,8 +2807,10 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       audioPlayerRef.current.pause();
     }
     if (currentScreen === "article-detail") {
-      if (cameFromSearch || !selectedTopic) {
+      if (cameFromSearch) {
         setCurrentScreen("search-articles");
+      } else if (!selectedTopic) {
+        setCurrentScreen("dashboard");
       } else {
         setCurrentScreen("articles");
       }
@@ -2653,16 +2818,21 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       window.speechSynthesis.cancel();
     } else if (currentScreen === "articles") {
       setCurrentScreen("topics");
-      setSelectedTopic(null);
     } else if (currentScreen === "edit-article") {
-      setCurrentScreen(isEditingNew ? ((cameFromSearch || !selectedTopic) ? "search-articles" : "articles") : "article-detail");
+      setCurrentScreen(isEditingNew ? ((cameFromSearch || !selectedTopic) ? (selectedTopic ? "articles" : "dashboard") : "articles") : "article-detail");
     } else if (currentScreen === "vocabulary" || currentScreen === "points-to-note") {
       setCurrentScreen("article-detail");
-    } else if (currentScreen === "topic-management" || currentScreen === "settings") {
+    } else if (currentScreen === "topic-management") {
       setCurrentScreen("topics");
-    } else if (currentScreen === "search-articles") {
-      setCurrentScreen("topics");
-    } else if (currentScreen === "topics") {
+    } else if (currentScreen === "vocab-compilation") {
+      setCurrentScreen(vocabCompOrigin);
+      if (vocabCompOrigin === "dashboard") {
+        setSelectedTopic(null);
+      }
+    } else if (currentScreen === "topics" || currentScreen === "settings" || currentScreen === "search-articles") {
+      setCurrentScreen("dashboard");
+      setSelectedTopic(null);
+    } else if (currentScreen === "dashboard") {
       setShowExitDialog(true);
     }
   };
@@ -2786,6 +2956,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         className="hidden"
       />
                 {/* Header Layout (TopAppBar) */}
+                {currentScreen !== "dashboard" && currentScreen !== "exited" && currentScreen !== "vocab-compilation" && (
                 <div className="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 shadow-xs relative z-40">
                   <div className="flex items-center space-x-2 min-w-0 flex-1 mr-2">
                     {currentScreen === "topics" && (
@@ -2808,6 +2979,31 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               <div className="px-4 py-1 text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                                 Actions
                               </div>
+                              <button
+                                id="menu-home-dashboard"
+                                onClick={() => {
+                                  setIsTopicsMenuOpen(false);
+                                  setCurrentScreen("dashboard");
+                                }}
+                                className="w-full text-left px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2.5 cursor-pointer"
+                              >
+                                <Home className="w-4 h-4 text-slate-500" />
+                                <span>Home - Dashboard</span>
+                              </button>
+
+                              <button
+                                id="menu-browse-vocabulary"
+                                onClick={() => {
+                                  setIsTopicsMenuOpen(false);
+                                  setVocabCompOrigin("topics");
+                                  setCurrentScreen("vocab-compilation");
+                                }}
+                                className="w-full text-left px-4 py-2 text-[12px] font-semibold text-slate-700 hover:bg-slate-50 hover:text-indigo-650 transition-colors flex items-center space-x-2.5 cursor-pointer"
+                              >
+                                <BookOpen className="w-4 h-4 text-slate-500" />
+                                <span>Browse Vocabulary</span>
+                              </button>
+
                               <button
                                 onClick={() => {
                                   setIsTopicsMenuOpen(false);
@@ -3395,6 +3591,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* SCREEN CONTENT AREA */}
                 <div className="flex-1 overflow-hidden relative flex flex-col min-h-0">
@@ -3413,6 +3610,413 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                         {vdbStatus.message}
                       </span>
                     </div>
+                  )}
+
+                  {/* SCREEN: Exited */}
+                  {currentScreen === "exited" && (
+                    <motion.div
+                      key="exited"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="flex-1 flex flex-col items-center justify-center p-6 bg-slate-900 text-white text-center h-full select-none"
+                    >
+                      <div className="space-y-6 max-w-xs">
+                        <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto text-xl shadow-md border border-slate-700/50">
+                          💤
+                        </div>
+                        <div className="space-y-2">
+                          <h3 className="text-base font-black tracking-tight">Application Closed</h3>
+                          <p className="text-xs text-slate-400 leading-normal">
+                            You have exited VYN LingoBunny. The study session has been saved safely in your local database.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          id="btn-restart-app"
+                          onClick={() => {
+                            setShowSplash(true);
+                            setCurrentScreen("dashboard");
+                            setTimeout(() => setShowSplash(false), 2000);
+                          }}
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs uppercase tracking-wider transition-all cursor-pointer shadow-md shadow-indigo-950/40 hover:scale-[1.02] active:scale-[0.98]"
+                        >
+                          Restart Application
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* SCREEN: Dashboard */}
+                  {currentScreen === "dashboard" && (
+                    <motion.div
+                      key="dashboard"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -10 }}
+                      transition={{ duration: 0.2 }}
+                      className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden select-none font-sans"
+                    >
+                      {/* Custom Dashboard Header */}
+                      <div className="bg-white border-b border-slate-200/80 px-4 py-3 shrink-0 flex items-center justify-between shadow-3xs">
+                        <div className="flex flex-col text-left">
+                          <span className="text-[10px] uppercase font-black tracking-widest text-indigo-600/95">Welcome back</span>
+                          <h2 className="text-base font-black text-slate-800 leading-tight">Hello, my friend!</h2>
+                        </div>
+                        <div className="flex items-center space-x-1.5 bg-amber-50 border border-amber-200 px-3 py-1 rounded-full shadow-3xs">
+                          <span className="text-[9px] font-black uppercase tracking-wider text-amber-700/90 mr-0.5 font-sans">Streak</span>
+                          <Flame className="w-4 h-4 text-amber-500 fill-amber-400 animate-pulse shrink-0" />
+                          <span className="text-xs font-black text-amber-800 font-mono leading-none">
+                            {calculateStreak(studyTimes)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Main Dashboard Content */}
+                      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-200">
+                        {/* 1. Shortcuts / Learning Section */}
+                        <div className="space-y-2.5">
+                          <h3 className="text-[10px] font-black tracking-wider text-slate-400 uppercase text-left">Learning Section</h3>
+                          
+                          {/* Shortcut A: Most Recently Created Article */}
+                          {(() => {
+                            const recentArticle = getMostRecentArticle();
+                            if (recentArticle) {
+                              const sourceTopic = topics.find(t => t.id === recentArticle.topicId);
+                              return (
+                                <div
+                                  onClick={() => {
+                                    setSelectedTopic(sourceTopic || null);
+                                    setSelectedArticle(recentArticle);
+                                    setCameFromSearch(false);
+                                    setCurrentScreen("article-detail");
+                                    onOpenArticle(recentArticle.id);
+                                  }}
+                                  className="relative overflow-hidden bg-gradient-to-br from-indigo-900 to-indigo-950 border border-indigo-950 rounded-2xl p-4 text-left shadow-md hover:scale-[0.99] transition-all cursor-pointer group"
+                                >
+                                  {/* Ambient background decoration */}
+                                  <div className="absolute right-0 bottom-0 translate-x-4 translate-y-4 w-28 h-28 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
+                                  
+                                  <div className="flex items-center justify-between mb-2">
+                                    <span className="bg-indigo-500/25 text-indigo-200 text-[9px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full border border-indigo-500/20">
+                                      Latest Article
+                                    </span>
+                                    <span className="text-indigo-300 text-[10px] font-medium font-mono">
+                                      {new Date(recentArticle.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                    </span>
+                                  </div>
+                                  <h4 className="text-white text-sm font-black line-clamp-1 mb-1 tracking-tight group-hover:text-indigo-200 transition-colors">
+                                    {recentArticle.title}
+                                  </h4>
+                                  <p className="text-indigo-200/80 text-[11px] line-clamp-2 leading-relaxed mb-3 font-sans">
+                                    {(() => {
+                                      const lines = recentArticle.content.split("\n");
+                                      const cleanedLines = lines
+                                        .map(line => line.trim())
+                                        .filter(line => {
+                                          if (!line) return false;
+                                          if (/^\d+$/.test(line)) return false;
+                                          if (line.includes("-->") || /^\d{2}:\d{2}/.test(line)) return false;
+                                          if (line.startsWith("##")) return false;
+                                          return true;
+                                        });
+                                      return cleanedLines
+                                        .join(" ")
+                                        .replace(/<[^>]*>/g, '')
+                                        .trim()
+                                        .substring(0, 150);
+                                    })()}
+                                  </p>
+                                  <div className="flex items-center text-[10px] text-indigo-300 font-bold uppercase tracking-wider gap-1">
+                                    <span>Read and Study Now</span>
+                                    <ChevronRight className="w-3.5 h-3.5 transform group-hover:translate-x-0.5 transition-transform" />
+                                  </div>
+                                </div>
+                              );
+                            } else {
+                              return (
+                                <div className="bg-slate-100 border border-dashed border-slate-200 rounded-2xl p-6 text-center text-slate-400">
+                                  <BookOpen className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                                  <p className="text-xs font-bold text-slate-500">No Articles Available</p>
+                                  <p className="text-[10px] max-w-[200px] mx-auto mt-1 leading-relaxed">
+                                    Please import backup data or add topics and articles to start your learning journey!
+                                  </p>
+                                </div>
+                              );
+                            }
+                          })()}
+
+                          {/* Shortcuts Grid: Topics & Vocabulary Compilation */}
+                          <div className="grid grid-cols-2 gap-3">
+                            {/* Shortcut B: My Topics */}
+                            <div
+                              onClick={() => setCurrentScreen("topics")}
+                              style={{ background: 'linear-gradient(135deg, #ffffff 0%, #32FA96 100%)' }}
+                              className="border border-slate-200 rounded-2xl p-3.5 text-center shadow-3xs hover:scale-[0.99] transition-all cursor-pointer group flex flex-col items-center justify-between min-h-[105px]"
+                            >
+                              <div className="w-8 h-8 rounded-xl bg-white/80 border border-slate-100 flex items-center justify-center text-slate-850 mb-2 shadow-2xs">
+                                <Sparkles className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="text-slate-850 text-xs font-black tracking-wider transition-colors uppercase leading-tight">
+                                  START WITH<br />MY TOPICS
+                                </h4>
+                                <p className="text-slate-600 text-[10px] leading-snug mt-1 font-bold">Explore {topics.length} subjects</p>
+                              </div>
+                            </div>
+
+                            {/* Shortcut C: Vocabulary Compilation */}
+                            <div
+                              onClick={() => {
+                                setVocabCompOrigin("dashboard");
+                                setCurrentScreen("vocab-compilation");
+                              }}
+                              style={{ background: 'linear-gradient(135deg, #ffffff 0%, #FCE94F 100%)' }}
+                              className="border border-slate-200 rounded-2xl p-3.5 text-center shadow-3xs hover:scale-[0.99] transition-all cursor-pointer group flex flex-col items-center justify-between min-h-[105px]"
+                            >
+                              <div className="w-8 h-8 rounded-xl bg-white/80 border border-slate-100 flex items-center justify-center text-slate-850 mb-2 shadow-2xs">
+                                <BookOpen className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h4 className="text-slate-850 text-xs font-black tracking-wider transition-colors uppercase leading-tight">VOCABULARY COMPILATION</h4>
+                                <p className="text-slate-600 text-[10px] leading-snug mt-1 font-bold">
+                                  {articles.reduce((acc, art) => acc + (art.vocabulary?.length || 0), 0)} saved words
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 2. Stats Section */}
+                        <div className="space-y-2.5">
+                          <h3 className="text-[10px] font-black tracking-wider text-slate-400 uppercase text-left">Quick Stats Overview</h3>
+                          
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-white border border-slate-200/90 rounded-xl p-3 text-left shadow-3xs">
+                              <span className="text-[9px] font-black tracking-wider text-slate-400 uppercase block">Total Articles</span>
+                              <span className="text-xl font-extrabold text-slate-800 mt-0.5 block">{articles.length}</span>
+                            </div>
+
+                            <div className="bg-white border border-slate-200/90 rounded-xl p-3 text-left shadow-3xs">
+                              <span className="text-[9px] font-black tracking-wider text-slate-400 uppercase block">Total Vocabulary</span>
+                              <span className="text-xl font-extrabold text-slate-800 mt-0.5 block">
+                                {articles.reduce((acc, art) => acc + (art.vocabulary?.length || 0), 0)}
+                              </span>
+                            </div>
+
+                            <div className="bg-white border border-slate-200/90 rounded-xl p-3 text-left shadow-3xs">
+                              <span className="text-[9px] font-black tracking-wider text-slate-400 uppercase block">Created Yesterday</span>
+                              <span className="text-lg font-black text-slate-700 mt-0.5 block">
+                                {countVocabsCreatedOn(getFormattedDateStrings().yesterday)} words
+                              </span>
+                            </div>
+
+                            <div className="bg-emerald-550 border border-emerald-600 rounded-xl p-3 text-left shadow-3xs text-white">
+                              <span className="text-[9px] font-black tracking-wider text-emerald-100 uppercase block">Created Today</span>
+                              <span className="text-lg font-black text-white mt-0.5 block animate-pulse">
+                                {countVocabsCreatedOn(getFormattedDateStrings().today)} words
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Study Time with Chart Card */}
+                          <div className="bg-white border border-slate-200 rounded-2xl p-4 text-left shadow-3xs space-y-3.5">
+                            <div className="flex items-center justify-between border-b border-slate-105 pb-2">
+                              <div className="flex flex-col text-left">
+                                <span className="text-[9px] font-black tracking-wider text-slate-400 uppercase">Today's Study Time</span>
+                                <span className="text-sm font-black text-slate-850 mt-0.5">
+                                  {formatStudyTime(studyTimes[getFormattedDateStrings().today] || 0)}
+                                </span>
+                              </div>
+                              <span className="text-[9px] font-extrabold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded uppercase">
+                                Last 15 Days
+                              </span>
+                            </div>
+
+                            {/* Custom Responsive SVG/Pure-CSS Bar Chart */}
+                            <div className="space-y-2">
+                              <div className="h-20 flex items-end justify-between px-1 gap-1.5 pt-4">
+                                {getPast15DaysData().map((dayData, idx) => {
+                                  // Max minutes for scaling bars to a maximum height of 100%
+                                  const maxMins = Math.max(...getPast15DaysData().map(d => d.mins), 5);
+                                  const heightPercent = maxMins > 0 ? (dayData.mins / maxMins) * 100 : 0;
+                                  return (
+                                    <div key={idx} className="flex-1 flex flex-col items-center h-full group/bar relative">
+                                      {/* Tooltip on Hover */}
+                                      <div className="absolute bottom-full mb-1 bg-slate-900 text-white text-[8px] font-semibold px-1.5 py-0.5 rounded opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-md">
+                                        {dayData.mins}m ({dayData.label})
+                                      </div>
+                                      
+                                      {/* Bar element */}
+                                      <div className="w-full flex items-end justify-center flex-1">
+                                        <div
+                                          style={{ height: `${Math.max(heightPercent, 4)}%` }}
+                                          className={`w-full rounded-t-sm transition-all duration-300 ${
+                                            dayData.isToday 
+                                              ? 'bg-indigo-600 shadow-xs' 
+                                              : dayData.mins > 0 
+                                                ? 'bg-indigo-200 group-hover/bar:bg-indigo-350' 
+                                                : 'bg-slate-105 group-hover/bar:bg-slate-200'
+                                          }`}
+                                        />
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              
+                              {/* Labels Row */}
+                              <div className="flex justify-between text-[8px] font-black text-slate-400 font-mono pt-1.5 border-t border-slate-100">
+                                <span>15 Days Ago</span>
+                                <span>Today</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {/* SCREEN: Vocabulary Compilation */}
+                  {currentScreen === "vocab-compilation" && (
+                    <motion.div
+                      key="vocab-compilation"
+                      initial={{ opacity: 0, x: 15 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -15 }}
+                      transition={{ duration: 0.18 }}
+                      className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden relative select-none font-sans"
+                    >
+                      {/* Top bar header */}
+                      <div className="h-14 bg-white border-b border-slate-200 px-4 flex items-center justify-between shrink-0 shadow-xs relative z-40">
+                        <button
+                          onClick={goBack}
+                          className="p-1 hover:bg-slate-100 rounded-full text-slate-650 transition-colors cursor-pointer"
+                        >
+                          <ArrowLeft className="w-5 h-5" />
+                        </button>
+                        <span className="font-topbar font-extrabold text-slate-850 text-[14px] flex-1 text-center truncate mr-6 font-sans">
+                          Vocabulary compilation
+                        </span>
+                      </div>
+
+                      {/* Lookup Search Input bar */}
+                      <div className="p-3 bg-white border-b border-slate-200 shrink-0">
+                        <div className="relative">
+                          <input
+                            type="text"
+                            placeholder="Lookup saved words, definitions..."
+                            value={vocabLookupQuery}
+                            onChange={(e) => setVocabLookupQuery(e.target.value)}
+                            className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 focus:bg-white rounded-xl pl-9 pr-4 py-2 text-xs text-slate-800 outline-none transition-all font-sans"
+                          />
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                          {vocabLookupQuery && (
+                            <button
+                              onClick={() => setVocabLookupQuery("")}
+                              className="absolute right-2.5 top-2 p-0.5 hover:bg-slate-200 rounded-full text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Scrollable Compiled Word List */}
+                      <div className="flex-1 overflow-y-auto p-3.5 space-y-3.5 scrollbar-thin scrollbar-thumb-slate-205">
+                        {(() => {
+                          // Compile all vocabulary across all articles
+                          const compiledList: Array<{ vocab: VocabularyItem; article: Article }> = [];
+                          articles.forEach(art => {
+                            (art.vocabulary || []).forEach(v => {
+                              compiledList.push({ vocab: v, article: art });
+                            });
+                          });
+
+                          // Filter based on query
+                          const query = vocabLookupQuery.toLowerCase().trim();
+                          const filtered = compiledList.filter(item => {
+                            if (!query) return true;
+                            return (
+                              item.vocab.word.toLowerCase().includes(query) ||
+                              item.vocab.definition.toLowerCase().includes(query) ||
+                              (item.vocab.exampleSentence || "").toLowerCase().includes(query)
+                            );
+                          });
+
+                          if (filtered.length === 0) {
+                            return (
+                              <div className="text-center py-12 px-4 bg-white border border-dashed border-slate-200 rounded-2xl space-y-2">
+                                <BookOpen className="w-8 h-8 text-slate-300 mx-auto" />
+                                <p className="text-xs font-bold text-slate-505">No matching vocabulary found</p>
+                                <p className="text-[10px] text-slate-400 max-w-[200px] mx-auto leading-normal font-sans">
+                                  {compiledList.length === 0 
+                                    ? "Add vocabulary words to your articles first!" 
+                                    : "Try searching for another word, definition, or example sentence."}
+                                </p>
+                              </div>
+                            );
+                          }
+
+                          return filtered.map((item, mapIdx) => {
+                            const transSizeMap: Record<string, string> = {
+                              "text-[11px]": "text-[11px]",
+                              "text-[13px]": "text-[12px]",
+                              "text-[15px]": "text-[13px]",
+                              "text-[18px]": "text-[14px]",
+                              "text-[22px]": "text-[15px]",
+                              "text-[26px]": "text-[16px]",
+                              "text-[32px]": "text-[17px]",
+                            };
+                            const transSizeClass = transSizeMap[vocabFontSize] || "text-[12px]";
+
+                            return (
+                              <div
+                                key={`${item.vocab.id}-${mapIdx}`}
+                                className="border rounded-xl p-3 shadow-3xs space-y-2 transition-all duration-150 border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/10"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div
+                                    onClick={() => speakSingleWord(item.vocab.word)}
+                                    className="min-w-0 flex-1 cursor-pointer hover:opacity-80 transition-all text-left"
+                                  >
+                                    {/* Foreign Word using Signika font, dynamic size controlled via zoom */}
+                                    <p
+                                      className={`${vocabFontSize} font-semibold text-slate-950 font-article break-words leading-tight select-all`}
+                                    >
+                                      {item.vocab.word}
+                                    </p>
+                                    {/* Translation Meaning */}
+                                    <p className={`${transSizeClass} pl-3 font-medium text-slate-500 italic mt-0.5 select-all leading-snug`}>
+                                      {item.vocab.definition}
+                                    </p>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleViewVocabArticle(item.article)}
+                                    className="text-[9px] font-extrabold uppercase tracking-wider text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-1 rounded hover:bg-indigo-100 transition-all cursor-pointer shrink-0 font-sans"
+                                    title={`Go to source article: ${item.article.title}`}
+                                  >
+                                    ARTICLE &gt;
+                                  </button>
+                                </div>
+
+                                {item.vocab.exampleSentence && (
+                                  <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-left select-all">
+                                    <p className={`${transSizeClass} text-slate-400 leading-normal font-medium bg-slate-50/55 p-1 px-1.5 rounded-md whitespace-pre-line`}>
+                                      <span className="font-semibold text-slate-500 uppercase tracking-wider text-[8px] mr-1 font-sans">
+                                        Ex:
+                                      </span>
+                                      "{item.vocab.exampleSentence}"
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </motion.div>
                   )}
 
                   {/* SCREEN 1: Topics List */}
@@ -4834,7 +5438,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                                 className="w-full bg-white border border-amber-250 rounded-lg px-2 py-1 text-xs font-semibold text-slate-800 outline-none focus:ring-1 focus:ring-amber-400 select-text"
                                               />
                                               <textarea
-                                                rows={2}
+                                                rows={4}
                                                 value={editingExample}
                                                 onChange={(e) =>
                                                   setEditingExample(
@@ -4920,7 +5524,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                               {/* Example section (Clicking this is ignored for TTS as requested) */}
                                               {vocab.exampleSentence && (
                                                 <div className="mt-1.5 pt-1.5 border-t border-slate-100 text-left select-all">
-                                                  <p className={`${transSizeClass} text-slate-400 leading-normal font-medium bg-slate-50/55 p-1 px-1.5 rounded-md`}>
+                                                  <p className={`${transSizeClass} text-slate-400 leading-normal font-medium bg-slate-50/55 p-1 px-1.5 rounded-md whitespace-pre-line`}>
                                                     <span className="font-semibold text-slate-500 uppercase tracking-wider text-[8px] mr-1 font-sans">
                                                       Ex:
                                                     </span>
@@ -5491,7 +6095,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       >
                         <div className="space-y-2 text-left">
                           <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                            <span className="text-base shrink-0">☪️</span>
+                            <span className="text-base shrink-0">🍀</span>
                             About VYN
                           </h3>
                           <div className="text-[11px] text-slate-650 space-y-2 leading-relaxed">
@@ -5627,6 +6231,7 @@ Nein, Sie müssen in Nürnberg umsteigen.{"\n"}
                                   console.warn("Failed to natively exit app:", err);
                                 }
                               } else {
+                                setCurrentScreen("exited");
                                 console.log("Standard browser / simulator exit: return to previous screen by closing exit confirmation dialog.");
                               }
                             }}
