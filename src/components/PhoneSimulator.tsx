@@ -65,6 +65,7 @@ declare global {
 import { Topic, Article, SubtitleSegment, VocabularyItem, AccessLog } from "../types";
 import { PointsToNote } from "./PointsToNote";
 import splashImage from "../assets/images/rabbit_carrot_splash_1781691897305.jpg";
+import clamsIcon from "../assets/images/clams.png";
 
 const ARTICLE_IMAGES = [
   "https://images.unsplash.com/photo-1456513080510-7bf3a84b82f8?auto=format&fit=crop&w=400&q=80", // Study desk with books
@@ -3658,7 +3659,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                     >
                       {/* Custom Dashboard Header */}
                       <div className="bg-white border-b border-slate-200/80 px-4 py-3 shrink-0 flex items-center justify-between shadow-3xs">
-                        <div className="flex items-center text-left">
+                        <div className="flex items-center text-left space-x-2.5">
+                          <img
+                            src={clamsIcon}
+                            alt="Clams"
+                            className="w-10 h-10 shrink-0 object-contain"
+                            referrerPolicy="no-referrer"
+                          />
                           <div className="flex flex-col">
                             <span className="text-[10px] uppercase font-black tracking-widest text-indigo-600/95">Welcome back</span>
                             <div className="flex items-center mt-0.5">
@@ -3782,7 +3789,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               </div>
                               <div>
                                 <h4 className="text-slate-850 text-xs font-black tracking-wider transition-colors uppercase leading-tight">
-                                  Vocabulay<br />Compilation
+                                  Vocabulary<br />Compilation
                                 </h4>
                                 <p className="text-slate-700 text-[10px] leading-snug mt-1 font-bold">
                                   {articles.reduce((acc, art) => acc + (art.vocabulary?.length || 0), 0)} saved words
