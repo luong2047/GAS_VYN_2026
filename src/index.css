@@ -6,6 +6,7 @@
   --font-topbar: "Fira Sans Considered", "Fira Sans Condensed", sans-serif;
   --font-article: "Signika", "Inter", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-signika: "Signika", sans-serif;
 }
 
 /* Custom formatting for Linguist Notes rich editor content */

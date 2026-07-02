@@ -3658,9 +3658,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                     >
                       {/* Custom Dashboard Header */}
                       <div className="bg-white border-b border-slate-200/80 px-4 py-3 shrink-0 flex items-center justify-between shadow-3xs">
-                        <div className="flex flex-col text-left">
-                          <span className="text-[10px] uppercase font-black tracking-widest text-indigo-600/95">Welcome back</span>
-                          <h2 className="text-base font-black text-slate-800 leading-tight">Hello, my friend!</h2>
+                        <div className="flex items-center text-left">
+                          <div className="flex flex-col">
+                            <span className="text-[10px] uppercase font-black tracking-widest text-indigo-600/95">Welcome back</span>
+                            <div className="flex items-center mt-0.5">
+                              <h2 className="text-xl font-black text-[#981242] leading-tight font-signika">My Companion!</h2>
+                            </div>
+                          </div>
                         </div>
                         <div className="flex items-center space-x-1.5 bg-amber-50 border border-amber-200 px-3 py-1 rounded-full shadow-3xs">
                           <span className="text-[9px] font-black uppercase tracking-wider text-amber-700/90 mr-0.5 font-sans">Streak</span>
@@ -3672,7 +3676,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                       </div>
 
                       {/* Main Dashboard Content */}
-                      <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-slate-200">
+                      <div className="flex-1 overflow-y-auto p-4 flex flex-col space-y-4 scrollbar-thin scrollbar-thumb-slate-200">
                         {/* 1. Shortcuts / Learning Section */}
                         <div className="space-y-2.5">
                           <h3 className="text-[10px] font-black tracking-wider text-slate-400 uppercase text-left">Learning Section</h3>
@@ -3750,8 +3754,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                             {/* Shortcut B: My Topics */}
                             <div
                               onClick={() => setCurrentScreen("topics")}
-                              style={{ background: 'linear-gradient(135deg, #ffffff 0%, #32FA96 100%)' }}
-                              className="border border-slate-200 rounded-2xl p-3.5 text-center shadow-3xs hover:scale-[0.99] transition-all cursor-pointer group flex flex-col items-center justify-between min-h-[105px]"
+                              style={{ background: 'linear-gradient(135deg, #8AE234 0%, #32FA96 100%)' }}
+                              className="border border-slate-200/50 rounded-2xl p-3.5 text-center shadow-3xs hover:scale-[0.99] transition-all cursor-pointer group flex flex-col items-center justify-between min-h-[105px]"
                             >
                               <div className="w-8 h-8 rounded-xl bg-white/80 border border-slate-100 flex items-center justify-center text-slate-850 mb-2 shadow-2xs">
                                 <Sparkles className="w-4 h-4" />
@@ -3760,7 +3764,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 <h4 className="text-slate-850 text-xs font-black tracking-wider transition-colors uppercase leading-tight">
                                   START WITH<br />MY TOPICS
                                 </h4>
-                                <p className="text-slate-600 text-[10px] leading-snug mt-1 font-bold">Explore {topics.length} subjects</p>
+                                <p className="text-slate-700 text-[10px] leading-snug mt-1 font-bold">Explore {topics.length} subjects</p>
                               </div>
                             </div>
 
@@ -3770,15 +3774,17 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                                 setVocabCompOrigin("dashboard");
                                 setCurrentScreen("vocab-compilation");
                               }}
-                              style={{ background: 'linear-gradient(135deg, #ffffff 0%, #FCE94F 100%)' }}
-                              className="border border-slate-200 rounded-2xl p-3.5 text-center shadow-3xs hover:scale-[0.99] transition-all cursor-pointer group flex flex-col items-center justify-between min-h-[105px]"
+                              style={{ background: 'linear-gradient(135deg, #FCAF3E 0%, #FCE94F 100%)' }}
+                              className="border border-slate-200/50 rounded-2xl p-3.5 text-center shadow-3xs hover:scale-[0.99] transition-all cursor-pointer group flex flex-col items-center justify-between min-h-[105px]"
                             >
                               <div className="w-8 h-8 rounded-xl bg-white/80 border border-slate-100 flex items-center justify-center text-slate-850 mb-2 shadow-2xs">
                                 <BookOpen className="w-4 h-4" />
                               </div>
                               <div>
-                                <h4 className="text-slate-850 text-xs font-black tracking-wider transition-colors uppercase leading-tight">VOCABULARY COMPILATION</h4>
-                                <p className="text-slate-600 text-[10px] leading-snug mt-1 font-bold">
+                                <h4 className="text-slate-850 text-xs font-black tracking-wider transition-colors uppercase leading-tight">
+                                  Vocabulay<br />Compilation
+                                </h4>
+                                <p className="text-slate-700 text-[10px] leading-snug mt-1 font-bold">
                                   {articles.reduce((acc, art) => acc + (art.vocabulary?.length || 0), 0)} saved words
                                 </p>
                               </div>
@@ -3810,70 +3816,71 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                               </span>
                             </div>
 
-                            <div className="bg-emerald-550 border border-emerald-600 rounded-xl p-3 text-left shadow-3xs text-white">
-                              <span className="text-[9px] font-black tracking-wider text-emerald-100 uppercase block">Created Today</span>
-                              <span className="text-lg font-black text-white mt-0.5 block animate-pulse">
-                                {countVocabsCreatedOn(getFormattedDateStrings().today)} words
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Study Time with Chart Card */}
-                          <div className="bg-white border border-slate-200 rounded-2xl p-4 text-left shadow-3xs space-y-3.5">
-                            <div className="flex items-center justify-between border-b border-slate-105 pb-2">
-                              <div className="flex flex-col text-left">
-                                <span className="text-[9px] font-black tracking-wider text-slate-400 uppercase">Today's Study Time</span>
-                                <span className="text-sm font-black text-slate-850 mt-0.5">
-                                  {formatStudyTime(studyTimes[getFormattedDateStrings().today] || 0)}
-                                </span>
-                              </div>
-                              <span className="text-[9px] font-extrabold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded uppercase">
-                                Last 15 Days
-                              </span>
-                            </div>
-
-                            {/* Custom Responsive SVG/Pure-CSS Bar Chart */}
-                            <div className="space-y-2">
-                              <div className="h-20 flex items-end justify-between px-1 gap-1.5 pt-4">
-                                {getPast15DaysData().map((dayData, idx) => {
-                                  // Max minutes for scaling bars to a maximum height of 100%
-                                  const maxMins = Math.max(...getPast15DaysData().map(d => d.mins), 5);
-                                  const heightPercent = maxMins > 0 ? (dayData.mins / maxMins) * 100 : 0;
-                                  return (
-                                    <div key={idx} className="flex-1 flex flex-col items-center h-full group/bar relative">
-                                      {/* Tooltip on Hover */}
-                                      <div className="absolute bottom-full mb-1 bg-slate-900 text-white text-[8px] font-semibold px-1.5 py-0.5 rounded opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-md">
-                                        {dayData.mins}m ({dayData.label})
-                                      </div>
-                                      
-                                      {/* Bar element */}
-                                      <div className="w-full flex items-end justify-center flex-1">
-                                        <div
-                                          style={{ height: `${Math.max(heightPercent, 4)}%` }}
-                                          className={`w-full rounded-t-sm transition-all duration-300 ${
-                                            dayData.isToday 
-                                              ? 'bg-indigo-600 shadow-xs' 
-                                              : dayData.mins > 0 
-                                                ? 'bg-indigo-200 group-hover/bar:bg-indigo-350' 
-                                                : 'bg-slate-105 group-hover/bar:bg-slate-200'
-                                          }`}
-                                        />
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                              
-                              {/* Labels Row */}
-                              <div className="flex justify-between text-[8px] font-black text-slate-400 font-mono pt-1.5 border-t border-slate-100">
-                                <span>15 Days Ago</span>
-                                <span>Today</span>
-                              </div>
-                            </div>
+                          {/* Created Today Card */}
+                          <div className="bg-white border border-slate-200/90 rounded-xl p-3 text-left shadow-3xs">
+                            <span className="text-[9px] font-black tracking-wider text-slate-400 uppercase block font-sans">Created Today</span>
+                            <span className="text-lg font-black text-indigo-650 mt-0.5 block animate-pulse">
+                              {countVocabsCreatedOn(getFormattedDateStrings().today)} words
+                            </span>
                           </div>
                         </div>
                       </div>
-                    </motion.div>
+
+                      {/* Study Time Chart: A card that stretches dynamically by bottom screen edge */}
+                      <div className="bg-white border border-slate-200 rounded-2xl p-4 text-left shadow-3xs space-y-3 flex-1 flex flex-col min-h-[165px]">
+                        <div className="flex items-center justify-between border-b border-slate-105 pb-1.5 shrink-0">
+                          <div className="flex flex-col text-left">
+                            <span className="text-[9px] font-black tracking-wider text-slate-400 uppercase">Today's Study Time</span>
+                            <span className="text-sm font-black text-slate-850 mt-0.5">
+                              {formatStudyTime(studyTimes[getFormattedDateStrings().today] || 0)}
+                            </span>
+                          </div>
+                          <span className="text-[9px] font-extrabold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded uppercase font-sans">
+                            Last 15 Days
+                          </span>
+                        </div>
+
+                        {/* Custom Responsive SVG/Pure-CSS Bar Chart */}
+                        <div className="space-y-1.5 flex-1 flex flex-col justify-between">
+                          <div className="flex-1 flex items-end justify-between px-1 gap-1.5 pt-2 min-h-[60px]">
+                            {getPast15DaysData().map((dayData, idx) => {
+                              // Max minutes for scaling bars to a maximum height of 100%
+                              const maxMins = Math.max(...getPast15DaysData().map(d => d.mins), 5);
+                              const heightPercent = maxMins > 0 ? (dayData.mins / maxMins) * 100 : 0;
+                              return (
+                                <div key={idx} className="flex-1 flex flex-col items-center h-full group/bar relative">
+                                  {/* Tooltip on Hover */}
+                                  <div className="absolute bottom-full mb-1 bg-slate-900 text-white text-[8px] font-semibold px-1.5 py-0.5 rounded opacity-0 group-hover/bar:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50 shadow-md">
+                                    {dayData.mins}m ({dayData.label})
+                                  </div>
+                                  
+                                  {/* Bar element */}
+                                  <div className="w-full flex items-end justify-center flex-1">
+                                    <div
+                                      style={{ height: `${Math.max(heightPercent, 4)}%` }}
+                                      className={`w-full rounded-t-sm transition-all duration-300 ${
+                                        dayData.isToday 
+                                          ? 'bg-indigo-600 shadow-xs' 
+                                          : dayData.mins > 0 
+                                            ? 'bg-indigo-200 group-hover/bar:bg-indigo-350' 
+                                            : 'bg-slate-105 group-hover/bar:bg-slate-200'
+                                      }`}
+                                    />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          
+                          {/* Labels Row */}
+                          <div className="flex justify-between text-[8px] font-black text-slate-400 font-mono pt-1.5 border-t border-slate-100 shrink-0">
+                            <span>15 Days Ago</span>
+                            <span>Today</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
                   )}
 
                   {/* SCREEN: Vocabulary Compilation */}
